@@ -1,0 +1,24 @@
+{
+  "name": "brain",
+  "version": "0.1.0",
+  "private": true,
+  "description": "",
+  "license": "ISC",
+  "author": "Jalal Ahmed (Skinnyytallboy)",
+  "type": "module",
+  "main": "index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "typescript": "^7.0.2"
+  }
+}
