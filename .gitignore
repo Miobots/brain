@@ -1,7 +1,42 @@
+# Dependencies
 node_modules/
-dist/
+
+# Environment / secrets
 .env
+.env.*
+!.env.example
+
+# Build output
+dist/
+build/
+out/
+
+# Coverage
+coverage/
+
+# Logs
 *.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+
+# OS
 .DS_Store
-pgdata/
-.outbox.json
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Temporary
+tmp/
+temp/
+
+# Local caches
+.cache/
+.eslintcache
