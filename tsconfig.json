@@ -18,6 +18,6 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true
   },
-  "include": ["src/**/*", "tests/integration/orchestrator.test.ts"],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }
