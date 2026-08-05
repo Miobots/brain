@@ -14,4 +14,3 @@ export interface ChatResponse{
 export interface AiInterface{
     chat(req: ChatRequest):Promise<ChatResponse>;
 }
-

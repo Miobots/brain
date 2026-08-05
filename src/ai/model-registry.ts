@@ -14,7 +14,7 @@ export const registry = customProvider({
 export class ModelRegistry{
     get(name:string){
         const model = registry.languageModel(name)
-        if(!name){
+        if(!model){
             throw new Error(`Unknown model alias : ${name}`)
         }
         return model

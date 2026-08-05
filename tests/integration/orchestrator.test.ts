@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { AIOrchestrator } from './orchestrator.js';
-import { ModelRegistry } from './model-registry.js';
-import { FallbackManager } from './fallback-manager.js';
+import { AIOrchestrator } from '../../src/ai/orchestrator.js';
+import { ModelRegistry } from '../../src/ai/model-registry.js';
+import { FallbackManager } from '../../src/ai/fallback-manager.js';
 
 describe('AIOrchestrator', () => {
   it('gets a response from the primary model', async () => {
