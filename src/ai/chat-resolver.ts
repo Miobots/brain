@@ -14,16 +14,7 @@ import type {
   ToolDefinition,
 } from './interface.js';
  
-/**
- * Replaces fallback-manager.ts.
- *
- * WHAT CHANGED AND WHY: the old manager looped over three hardcoded model aliases,
- * retrying each with a doubling timeout and a failure counter. Per your brief, that's
- * gone. One attempt, one clear structured answer for why it failed, logged. The
- * strategy interface below is the seam that lets retry/multi-provider come back later
- * without touching AiGateway or any Brain call site.
- */
- 
+
 export interface ResolverDeps {
   registry: ModelRegistry;
   queue: RequestQueue;
@@ -39,7 +30,6 @@ export class SingleAttemptStrategy implements ResolutionStrategy {
     const { registry, queue, logger } = deps;
  
     if (req.stream) {
-      // Explicit rejection beats silently ignoring the flag.
       return failure(req, {
         code: 'not_implemented',
         message: 'Streaming is not implemented yet.',
@@ -68,8 +58,7 @@ export class SingleAttemptStrategy implements ResolutionStrategy {
             ...(req.maxOutputTokens !== undefined
               ? { maxOutputTokens: req.maxOutputTokens }
               : {}),
-            // maxRetries 0: retry policy is this layer's decision, not the SDK's.
-            maxRetries: 0,
+            maxRetries: 3,
           }),
           timeoutMs,
         ),
@@ -127,16 +116,7 @@ export class ChatResolver {
   }
 }
  
-/* ------------------------------------------------------------------ *
- * Mapping: your types <-> Vercel AI SDK types.
- * This is the ONLY place the translation happens.
- * ------------------------------------------------------------------ */
- 
-/**
- * TODO(fill in): verify against the `ai@^7` message types you have installed. The
- * shape below is the common one; if your version differs, this function is the single
- * place to adjust — nothing else in the codebase knows about SDK message shapes.
- */
+
 export function toModelMessages(messages: ChatMessage[]): ModelMessage[] {
   return messages.map((m) => {
     if (m.role === 'tool') {
@@ -168,14 +148,7 @@ export function toModelMessages(messages: ChatMessage[]): ModelMessage[] {
   });
 }
  
-/**
- * ToolDefinition (plain JSON Schema) -> the SDK's ToolSet.
- *
- * Note there is NO `execute` function attached. That is deliberate and load-bearing:
- * with no executor the SDK returns the tool call to us instead of running it, which is
- * exactly the boundary we want — the AI layer decides WHAT to call, the Brain's
- * permission layer decides WHETHER, and the Brain executes.
- */
+
 export function toToolSet(tools: ToolDefinition[]): ToolSet {
   const set: ToolSet = {};
   for (const t of tools) {
@@ -191,7 +164,7 @@ function toToolChoice(choice: NonNullable<ChatRequest['toolChoice']>) {
   return typeof choice === 'string' ? choice : { type: 'tool' as const, toolName: choice.name };
 }
  
-/** TODO(fill in): confirm field names on your installed `ai` version's GenerateTextResult. */
+
 function toChatSuccess(
   req: ChatRequest,
   raw: Awaited<ReturnType<typeof generateText>>,
