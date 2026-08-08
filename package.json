@@ -10,9 +10,11 @@
   "engines": {
     "node": ">=22"
   },
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
+"scripts": {
+  "build": "tsc",
+  "typecheck": "tsc --noEmit",
+  "test": "vitest"
+},
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.29",
     "@ai-sdk/google": "^4.0.33",
