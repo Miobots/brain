@@ -1,10 +1,7 @@
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import type { ChatModelFactory } from '../provider-factory.js';
- 
+import type { LanguageModel } from 'ai';
+import type { Credentials } from '../../config.js';
 
-export const createGoogleModel: ChatModelFactory = (model, creds) =>
-  createGoogleGenerativeAI({
-    apiKey: creds.apiKey,
-    ...(creds.baseUrl ? { baseURL: creds.baseUrl } : {}),
-  })(model);
- 
+export function buildGoogleModel(model: string, creds: Credentials): LanguageModel {
+  return createGoogleGenerativeAI({ apiKey: creds.apiKey })(model);
+}
