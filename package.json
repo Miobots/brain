@@ -1,24 +1,15 @@
 {
-  "name": "brain",
-  "version": "0.1.0",
+  "name": "@miobots/brain",
+  "version": "0.0.0",
   "private": true,
-  "description": "",
-  "license": "ISC",
-  "author": "Jalal Ahmed (Skinnyytallboy)",
+  "description": "Agent, memory, hub and sync",
   "type": "module",
-  "main": "index.js",
-  "engines": {
-    "node": ">=22"
-  },
+  "engines": { "node": ">=22" },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node src/index.ts",
+    "test": "node --test src/**/*.test.ts",
+    "typecheck": "tsc --noEmit"
   },
-  "dependencies": {
-    "dotenv": "^17.4.2",
-    "zod": "^4.4.3"
-  },
-  "devDependencies": {
-    "@types/node": "^26.1.2",
-    "typescript": "^7.0.2"
-  }
+  "dependencies": { "ws": "^8.18.0", "pg": "^8.13.0" },
+  "devDependencies": { "typescript": "^5.7.0", "@types/node": "^22.10.0", "@types/ws": "^8.5.13" }
 }
