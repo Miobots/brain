@@ -1,15 +1,37 @@
 {
   "name": "@miobots/brain",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Agent, memory, hub and sync",
+  "license": "ISC",
+  "author": "Jalal Ahmed (Skinnyytallboy)",
   "type": "module",
-  "engines": { "node": ">=22" },
-  "scripts": {
-    "start": "node src/index.ts",
-    "test": "node --test src/**/*.test.ts",
-    "typecheck": "tsc --noEmit"
+  "main": "index.js",
+  "engines": {
+    "node": ">=22"
   },
-  "dependencies": { "ws": "^8.18.0", "pg": "^8.13.0" },
-  "devDependencies": { "typescript": "^5.7.0", "@types/node": "^22.10.0", "@types/ws": "^8.5.13" }
+  "scripts": {
+    "build": "tsc",
+    "start": "node src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.29",
+    "@ai-sdk/google": "^4.0.33",
+    "@ai-sdk/openai": "^4.0.29",
+    "ai": "^7.0.51",
+    "dotenv": "^17.4.2",
+    "unpdf": "^1.8.0",
+    "zod": "^3.25.76",
+    "ws": "^8.18.0",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.23.5",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
 }
