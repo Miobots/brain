@@ -15,12 +15,13 @@ import type {
   ToolDefinition,
   AiClient
 } from './types.js';
+import { ProviderKind } from './config.js';
 
 
 //converts application messages to AI SDK format messages 
 //handles all types of messages such as tool calls and normal messages 
 //and messages with attachments 
-async function toModelMessages(messages: ChatMessage[]): Promise<ModelMessage[]> {
+async function toModelMessages(messages: ChatMessage[],kind:ProviderKind): Promise<ModelMessage[]> {
   const out: ModelMessage[] = [];
   for (const m of messages) {
     if (m.role === 'tool') {
@@ -43,7 +44,7 @@ async function toModelMessages(messages: ChatMessage[]): Promise<ModelMessage[]>
       continue;
     }
 
-    const files = await resolveAttachments(m.attachments);
+    const files = await resolveAttachments(m.attachments,kind);
     out.push({ role: m.role, content: [{ type: 'text', text: m.content }, ...files] } as ModelMessage);
   }
   return out;
@@ -80,10 +81,11 @@ function mapFinishReason(r: string | undefined): FinishReason {
 
 //FLOW : chat req -> resolve model from env -> convert messages to AI SDK format->
 //convert tools to AI SDK format -> generate text function call -> normalise reponse -->chat success
+//now we retrieve kind as well and send to resolve attachments
 export async function chat(req: ChatRequest): Promise<ChatResult> {
   try {
-    const { model, provider, modelName } = resolveModel(req.capability);
-    const messages = await toModelMessages(req.messages);
+    const { model, provider, modelName,kind } = resolveModel(req.capability);
+    const messages = await toModelMessages(req.messages,kind);
     const tools = toToolSet(req.tools);
 
     const started = Date.now();
@@ -131,8 +133,8 @@ export async function chat(req: ChatRequest): Promise<ChatResult> {
 
 //same flow as the function above just different sdk function call for streaming responses
 export async function stream(req: ChatRequest): Promise<StreamHandle> {
-  const { model, provider, modelName } = resolveModel(req.capability);
-  const messages = await toModelMessages(req.messages);
+  const { model, provider, modelName ,kind} = resolveModel(req.capability);
+  const messages = await toModelMessages(req.messages,kind);
   const tools = toToolSet(req.tools);
   const started = Date.now();
 

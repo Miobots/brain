@@ -23,5 +23,6 @@ export function resolveModel(capability: string) {
     model = builders[creds.kind](binding.model, creds);
     cache.set(key, model);
   }
-  return { model, provider: binding.provider, modelName: binding.model };
+  return { model, provider: binding.provider, modelName: binding.model, kind:creds.kind };
 }
+//now returns creds.kind if anthropic or google then they do accept pdfs

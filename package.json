@@ -10,17 +10,18 @@
   "engines": {
     "node": ">=22"
   },
-"scripts": {
-  "build": "tsc",
-  "typecheck": "tsc --noEmit",
-  "test": "vitest"
-},
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest"
+  },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.29",
     "@ai-sdk/google": "^4.0.33",
     "@ai-sdk/openai": "^4.0.29",
     "ai": "^7.0.51",
     "dotenv": "^17.4.2",
+    "unpdf": "^1.8.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
