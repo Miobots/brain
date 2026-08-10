@@ -1,8 +1,8 @@
 {
-  "name": "brain",
+  "name": "@miobots/brain",
   "version": "0.1.0",
   "private": true,
-  "description": "",
+  "description": "Agent, memory, hub and sync",
   "license": "ISC",
   "author": "Jalal Ahmed (Skinnyytallboy)",
   "type": "module",
@@ -12,6 +12,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "start": "node src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest"
   },
@@ -22,10 +23,13 @@
     "ai": "^7.0.51",
     "dotenv": "^17.4.2",
     "unpdf": "^1.8.0",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "ws": "^8.18.0",
+    "pg": "^8.13.0"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
+    "@types/ws": "^8.5.13",
     "tsx": "^4.23.5",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10"
