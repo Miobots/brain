@@ -20,10 +20,10 @@
         "@types/node": "^26.1.2",
         "@types/ws": "^8.5.13",
         "tsx": "^4.23.5",
-        "typescript": "5.9.3",
-        "vitest": "^4.1.10"
-      }
-    }
+        "typescript": "^5.9.3",
+        "vitest": "^4.1.10",
+      },
+    },
   },
   "packages": {
     "@ai-sdk/anthropic": ["@ai-sdk/anthropic@4.0.29", "", { "dependencies": { "@ai-sdk/provider": "4.0.5", "@ai-sdk/provider-utils": "5.0.20" }, "peerDependencies": { "zod": "3.25.76" } }, "sha512-e5McXB9sqfGBCCPVjoxKVGuWT8LIwRI4k6a8MbZWq6J+W1hmAsWv6oK0sD8z9GIcGJ66aEJSuzMuLyg+FtL4Ew=="],
