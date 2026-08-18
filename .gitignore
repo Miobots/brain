@@ -40,5 +40,4 @@ temp/
 # Local caches
 .cache/
 .eslintcache
-package-lock.json
 .env
