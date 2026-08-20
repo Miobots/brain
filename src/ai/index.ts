@@ -18,3 +18,6 @@ export type {
 
 export { chat, stream } from './client.js';
 export { builtinTools } from './tools/index.js';
+import { Kind } from "@miobots/protocol"
+
+const kind= Kind.CMD
