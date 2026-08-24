@@ -1,28 +1,28 @@
 import { WebSocket, WebSocketServer} from "ws";
 import { newEnvelope,HelloPayload, parse, Topics,validateHello, createWelcomeAck, encode } from "@miobots/protocol";
 import { env } from "node:process";
+import { stat } from "node:fs";
+import { config } from "./config.ts";
 
 
-const port = Number(process.env.PORT);
 
-if (!port) {
-    throw new Error("PORT is not set");
-}
+const port = config.port
+const DEV_TOKEN= config.devToken
 
-const wss = new WebSocketServer({
-    port,
+
+export const wss = new WebSocketServer({
+    port:config.port,
     path: "/ws",
 });
 const devices = new Map<string,WebSocket>();
-const DEV_TOKEN= process.env.DEV_TOKEN
-    if (!DEV_TOKEN){
-        throw new Error("DEV_TOKEN not present , refusing to start...")
-    }
+
 
 //TODO1: Make it more modular very dirty looking 
 //TODO2: Handle other topics aswell SYS.HEARBEAT 
 
-wss.on('connection', (ws)=>{
+export function startServer(port:number,dev_Token:string){
+
+    wss.on('connection', (ws)=>{
     //handles new client connections
     let deviceId: string | undefined;
 
@@ -38,16 +38,20 @@ wss.on('connection', (ws)=>{
             // handshake message
             const validation = validateHello(envelope.payload)
             if(!validation.valid){
-                console.log(`[SERVER] Invalid hello: ${validation.error}`);
+                const bad_welcome = createWelcomeAck(envelope,{accepted:false,reason:"invalid payload"})
+                ws.send(encode(bad_welcome))
+                console.log(`[SERVER] Invalid hello: ${validation.error} closing server`);
+                ws.close();
                 return;
+                
             }
             const hello = envelope.payload as HelloPayload;
             console.log(`[SERVER] Verified hello payload`)
             // dev token check
             if(hello.token!==DEV_TOKEN){
                 // authentication failed
-                const welcome = createWelcomeAck(envelope,{accepted:false,reason:"Unauthenticated token"})
-                ws.send(encode(welcome))
+                const bad_welcome = createWelcomeAck(envelope,{accepted:false,reason:"Unauthenticated token"})
+                ws.send(encode(bad_welcome))
                 console.log(`[SERVER] BAD DEV_TOKEN closing server`)
                 ws.close();
                 return;
@@ -74,4 +78,6 @@ wss.on('connection', (ws)=>{
 }
 
 );
+}
+startServer(port,DEV_TOKEN)
 console.log(`listening at ws://localhost:${port}/ws...`);
