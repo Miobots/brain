@@ -3,7 +3,8 @@ import { newEnvelope,HelloPayload, parse, Topics,validateHello, createWelcomeAck
 import { env } from "node:process";
 import { stat } from "node:fs";
 import { config } from "./config.ts";
-import { handleAck } from "./hub.ts";
+import { handleAck} from "./hub.ts";
+import { deviceCommands } from "./command-store.ts";
 
 
 
@@ -17,7 +18,6 @@ export const wss = new WebSocketServer({
 });
 export const devices = new Map<string,WebSocket>();
 
-
 //TODO1: Make it more modular very dirty looking 
 //TODO2: Handle other topics aswell SYS.HEARBEAT 
 
@@ -29,6 +29,11 @@ export function startServer(port:number,dev_Token:string){
 
 
     ws.on('message', (rawdata:string)=>{
+        //handles oversized message B0.5 M-50
+        if (rawdata.length > config.max_message_size){
+            console.log(`[SERVER] Message exceeds maximum size 5MB`)
+            return;
+        }
         const brain_data = parse(rawdata)
         if (!brain_data.success){
             console.log(`[SERVER] Error: ${brain_data.error}`)
@@ -60,6 +65,9 @@ export function startServer(port:number,dev_Token:string){
             //Device authenticated
             deviceId=hello.device_id
             devices.set(hello.device_id, ws);
+            if (!deviceCommands.has(deviceId)) {
+                deviceCommands.set(deviceId, new Map());
+                }
             console.log(`[SERVER] Device authenticated: ${deviceId}`);
             const welcome = createWelcomeAck(envelope,{accepted:true})
             ws.send(encode(welcome))
