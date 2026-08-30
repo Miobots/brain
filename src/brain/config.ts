@@ -42,6 +42,10 @@ if (!idempotency_cleanup_interval_ms) {
     );
 }
 
+if (!timeout_ms){
+    throw new Error("Timeout not set")
+}
+
 export const config = {
     port,
     devToken,
