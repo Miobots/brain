@@ -1,8 +1,9 @@
 import { WebSocket, WebSocketServer} from "ws";
-import { newEnvelope,HelloPayload, parse, Topics,validateHello, createWelcomeAck, encode } from "@miobots/protocol";
+import { newEnvelope,HelloPayload, parse, Topics,validateHello, createWelcomeAck, encode, Kind } from "@miobots/protocol";
 import { env } from "node:process";
 import { stat } from "node:fs";
 import { config } from "./config.ts";
+import { handleAck } from "./hub.ts";
 
 
 
@@ -14,7 +15,7 @@ export const wss = new WebSocketServer({
     port:config.port,
     path: "/ws",
 });
-const devices = new Map<string,WebSocket>();
+export const devices = new Map<string,WebSocket>();
 
 
 //TODO1: Make it more modular very dirty looking 
@@ -63,6 +64,10 @@ export function startServer(port:number,dev_Token:string){
             const welcome = createWelcomeAck(envelope,{accepted:true})
             ws.send(encode(welcome))
             console.log(`[SERVER] welcome Ack Sent`)
+        }
+        if (envelope.kind===Kind.ACK){
+            handleAck(envelope)
+            return;
         }
     }
     );
