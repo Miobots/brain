@@ -1,12 +1,9 @@
-import type { SpeakPayload } from "@miobots/protocol";
 import {
     encode,
     Kind,
     newEnvelope,
-    Topics,
-    parse,
+    type Envelope,
 } from "@miobots/protocol";
-import type { Envelope } from "@miobots/protocol";
 import { devices } from "./server.ts";
 import { randomUUID } from "node:crypto";
 import { config } from "./config.ts";
@@ -42,11 +39,11 @@ export function handleAck(ack: Envelope<string, unknown>): void {
     pending.resolve(ack);
 }
 
-export function sendCommand(
+export function sendCommand<T extends string = string, P = unknown>(
     device_id: string,
-    topic: typeof Topics.VOICE_SPEAK,
-    payload: SpeakPayload,)
-    : Promise<Envelope<string, unknown>> {
+    topic: T,
+    payload: P,
+): Promise<Envelope<string, unknown>> {
     const connection = devices.get(device_id);
 
     if (!connection) {
@@ -81,7 +78,7 @@ export function sendCommand(
 
                 reject(
                     new Error(
-                        `[HUB] Command timed out after 5 seconds: corr_id=${corr_id}`
+                        `[HUB] Command timed out after ${config.timeout_ms}ms: corr_id=${corr_id}`
                     )
                 );
             }, config.timeout_ms);

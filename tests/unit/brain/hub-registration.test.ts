@@ -84,11 +84,7 @@ describe("brain hub device registration", () => {
     port = await waitForListening();
   });
 
-  afterAll(async () => {
-    await new Promise<void>((resolve, reject) => {
-      serverModule.wss.close((error) => (error ? reject(error) : resolve()));
-    });
-  });
+
 
   it("registers a device after sys.hello and allows sendCommand with ACK", async () => {
     const client = await connect(port);
