@@ -64,11 +64,7 @@ describe("brain WebSocket server", () => {
 		});
 	});
 
-	afterAll(async () => {
-		await new Promise<void>((resolve, reject) => {
-			server.wss.close((error) => (error ? reject(error) : resolve()));
-		});
-	});
+
 
 	it("accepts a hello with the configured token", async () => {
 		const client = await connect();
