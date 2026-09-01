@@ -44,7 +44,8 @@ export function cleanupExpiredCommands(): void {
     }
 }
 
-setInterval(
+export const cleanupInterval = setInterval(
     cleanupExpiredCommands,
     config.idempotency_cleanup_interval_ms
 );
+cleanupInterval.unref?.();

@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
     Language,
     Topics,
@@ -18,6 +18,7 @@ process.env.COMMAND_EXPIRY_MS = "25";
 let hubModule: typeof import("../../../src/brain/hub.ts");
 let commandStoreModule: typeof import("../../../src/brain/command-store.ts");
 let serverModule: typeof import("../../../src/brain/server.ts");
+let configModule: typeof import("../../../src/brain/config.ts");
 
 type MockConnection = {
     send: ReturnType<typeof vi.fn>;
@@ -41,10 +42,26 @@ function wait(milliseconds: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+let originalTimeout: number;
+let originalExpiry: number;
+
 beforeAll(async () => {
+    configModule = await import("../../../src/brain/config.ts");
+    originalTimeout = configModule.config.timeout_ms;
+    originalExpiry = configModule.config.command_expiry_ms;
+    configModule.config.timeout_ms = 50;
+    configModule.config.command_expiry_ms = 25;
+
     commandStoreModule = await import("../../../src/brain/command-store.ts");
     serverModule = await import("../../../src/brain/server.ts");
     hubModule = await import("../../../src/brain/hub.ts");
+});
+
+afterAll(() => {
+    if (configModule) {
+        configModule.config.timeout_ms = originalTimeout;
+        configModule.config.command_expiry_ms = originalExpiry;
+    }
 });
 
 afterEach(() => {
@@ -142,5 +159,20 @@ describe("Brain Hub command idempotency", () => {
         await expect(
             hubModule.sendCommand("missing-device", Topics.VOICE_SPEAK, payload),
         ).rejects.toThrow("[HUB] Device missing-device is not connected");
+    });
+
+    it("sends generic commands with custom topic and payload", async () => {
+        const connection = connectMockDevice();
+        const navPayload = { goal_id: "kitchen-01", target: { x: 1.5, y: 2.0, theta: 0.0 } };
+        const commandPromise = hubModule.sendCommand(deviceId, "nav.goto", navPayload);
+        const command = decodeSentCommand(connection);
+
+        expect(command.topic).toBe("nav.goto");
+        expect(command.payload).toEqual(navPayload);
+
+        const ack = createAck(command, { accepted: true });
+        hubModule.handleAck(ack);
+
+        await expect(commandPromise).resolves.toBe(ack);
     });
 });
