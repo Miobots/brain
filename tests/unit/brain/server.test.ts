@@ -16,9 +16,17 @@ process.env.DEV_TOKEN = token;
 
 let server: typeof import("../../../src/brain/server.ts");
 
+function getPort(): number {
+	const addr = server?.wss?.address();
+	if (addr && typeof addr !== "string") {
+		return addr.port;
+	}
+	return port;
+}
+
 function connect() {
 	return new Promise<WebSocket>((resolve, reject) => {
-		const client = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+		const client = new WebSocket(`ws://127.0.0.1:${getPort()}/ws`);
 		client.once("open", () => resolve(client));
 		client.once("error", reject);
 	});
@@ -63,8 +71,6 @@ describe("brain WebSocket server", () => {
 			}
 		});
 	});
-
-
 
 	it("accepts a hello with the configured token", async () => {
 		const client = await connect();
@@ -122,6 +128,51 @@ describe("brain WebSocket server", () => {
 				client.once("message", () => {
 					clearTimeout(timer);
 					reject(new Error("server unexpectedly replied to voice.speak"));
+				});
+			}),
+		).resolves.toBeUndefined();
+		client.close();
+	});
+
+	it("ignores oversized messages without parsing or crashing", async () => {
+		const client = await connect();
+		const oversizedBuffer = Buffer.alloc(6 * 1024 * 1024); // 6MB > 5MB limit
+		client.send(oversizedBuffer);
+
+		await expect(
+			new Promise<void>((resolve, reject) => {
+				const timer = setTimeout(resolve, 100);
+				client.once("message", () => {
+					clearTimeout(timer);
+					reject(new Error("server unexpectedly replied to oversized message"));
+				});
+			}),
+		).resolves.toBeUndefined();
+		client.close();
+	});
+
+	it("ignores expired incoming commands", async () => {
+		const client = await connect();
+		const expiredCommand = newEnvelope({
+			kind: Kind.CMD,
+			topic: Topics.SYS_HELLO,
+			payload: {
+				device_id: "heart-test-expired",
+				token,
+				protocol_version: 1,
+				role: DeviceRole.HEART,
+			},
+			expires_at: Date.now() - 1000,
+		});
+
+		client.send(encode(expiredCommand));
+
+		await expect(
+			new Promise<void>((resolve, reject) => {
+				const timer = setTimeout(resolve, 100);
+				client.once("message", () => {
+					clearTimeout(timer);
+					reject(new Error("server unexpectedly replied to expired command"));
 				});
 			}),
 		).resolves.toBeUndefined();
