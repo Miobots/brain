@@ -1,10 +1,11 @@
 import { WebSocket, WebSocketServer} from "ws";
-import { newEnvelope,HelloPayload, parse, Topics,validateHello, createWelcomeAck, encode, Kind } from "@miobots/protocol";
+import { newEnvelope,HelloPayload, parse, Topics,validateHello, createWelcomeAck, encode, Kind} from "@miobots/protocol";
 import { env } from "node:process";
 import { stat } from "node:fs";
 import { config } from "./config.ts";
 import { handleAck} from "./hub.ts";
 import { deviceCommands } from "./command-store.ts";
+import { checksequence, resetSequencebrain } from "./sequence-tracker.ts";
 
 
 
@@ -40,6 +41,7 @@ export function startServer(port:number,dev_Token:string){
             return;
         }
         const envelope = brain_data.data
+        //sequence check here
         if (envelope.topic==Topics.SYS_HELLO){
             // handshake message
             const validation = validateHello(envelope.payload)
@@ -73,6 +75,14 @@ export function startServer(port:number,dev_Token:string){
             ws.send(encode(welcome))
             console.log(`[SERVER] welcome Ack Sent`)
         }
+        if (!deviceId) {
+            console.log(`[SERVER] Message received before authentication`);
+             return;
+        }
+        const sequenceOk= checksequence(deviceId,envelope.seq);
+        if(!sequenceOk){
+            return;
+        }
         if (envelope.kind===Kind.ACK){
             handleAck(envelope)
             return;
@@ -81,6 +91,7 @@ export function startServer(port:number,dev_Token:string){
     );
     ws.on("close", ()=>{
         if(deviceId){
+            resetSequencebrain(deviceId);
             devices.delete(deviceId)
             console.log(`[Server] Device disconnected ${deviceId}`)
         }
