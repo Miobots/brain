@@ -1,11 +1,9 @@
-import type { SpeakPayload } from "@miobots/protocol";
 import {
     encode,
     Kind,
     newEnvelope,
-    Topics,
+    type Envelope,
 } from "@miobots/protocol";
-import type { Envelope } from "@miobots/protocol";
 import { devices } from "./server.ts";
 import { randomUUID } from "node:crypto";
 import { config } from "./config.ts";
@@ -119,13 +117,13 @@ export function handleAck(
     pending.resolve(ack);
 }
 
-export function sendCommand(
+export function sendCommand<T extends string = string, P = unknown>(
     device_id: string,
-    topic: typeof Topics.VOICE_SPEAK,
-    payload: SpeakPayload,
+    topic: T,
+    payload: P,
     idem_key?: string,
+    expires_at?: number,
 ): Promise<Envelope<string, unknown>> {
-
     const connection = devices.get(device_id);
 
     if (!connection) {
@@ -136,16 +134,11 @@ export function sendCommand(
         );
     }
 
-    const map = deviceCommands.get(device_id);
-
-    if (map === undefined) {
-        return Promise.reject(
-            new Error(
-                `[HUB] Map has not been initialised`
-            )
-        );
+    let map = deviceCommands.get(device_id);
+    if (!map) {
+        map = new Map();
+        deviceCommands.set(device_id, map);
     }
-
 
     if (idem_key) {
         const existing = getExistingCommand(map, idem_key);
@@ -155,10 +148,9 @@ export function sendCommand(
         }
     }
 
-
     const corr_id = randomUUID();
     const commandIdemKey = idem_key ?? randomUUID();
-    const expires_at = Date.now() + config.command_expiry_ms;
+    const commandExpiresAt = expires_at ?? (Date.now() + config.command_expiry_ms);
 
     console.log(
         `[HUB] OUT corr_id=${corr_id} ` +
@@ -172,18 +164,15 @@ export function sendCommand(
         kind: Kind.CMD,
         topic,
         payload,
-        expires_at: expires_at,
+        expires_at: commandExpiresAt,
     });
-
 
     const ackPromise = new Promise<Envelope<string, unknown>>(
         (resolve, reject) => {
-
             const timeout = setTimeout(() => {
-
                 pendingCommands.delete(corr_id);
 
-                const command = map.get(commandIdemKey);
+                const command = map!.get(commandIdemKey);
 
                 if (command) {
                     command.status = "timeout";
@@ -199,8 +188,8 @@ export function sendCommand(
                         `${config.timeout_ms}ms: corr_id=${corr_id}`
                     )
                 );
-
             }, config.timeout_ms);
+
             pendingCommands.set(corr_id, {
                 device_id,
                 idem_key: commandIdemKey,
@@ -211,18 +200,16 @@ export function sendCommand(
         }
     );
 
-
     const commandRecord: CommandRecord = {
         idem_key: commandIdemKey,
         corr_id,
         status: "pending",
         promise: ackPromise,
         createdAt: Date.now(),
-        expires_at
+        expires_at: commandExpiresAt,
     };
 
     map.set(commandIdemKey, commandRecord);
-
 
     connection.send(encode(env));
 

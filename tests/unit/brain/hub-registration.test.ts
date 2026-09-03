@@ -17,7 +17,7 @@ import {
   type Envelope,
 } from "@miobots/protocol";
 
-process.env.PORT = "45871";
+process.env.PORT = "45873";
 process.env.DEV_TOKEN = "test-dev-token";
 process.env.ACK_TIMEOUT = "5000";
 
@@ -82,12 +82,6 @@ describe("brain hub device registration", () => {
     serverModule = await import("../../../src/brain/server.ts");
     hubModule = await import("../../../src/brain/hub.ts");
     port = await waitForListening();
-  });
-
-  afterAll(async () => {
-    await new Promise<void>((resolve, reject) => {
-      serverModule.wss.close((error) => (error ? reject(error) : resolve()));
-    });
   });
 
   it("registers a device after sys.hello and allows sendCommand with ACK", async () => {
