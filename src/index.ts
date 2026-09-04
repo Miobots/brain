@@ -1,2 +1,5 @@
-// Entry point. Scaffold only — see CLAUDE.md for the first real task.
-console.log("miobots-brain — scaffold running. Nothing implemented yet.");
+import "./brain/server.ts";
+import { config } from "./brain/config.ts";
+
+console.log(`Brain hub listening on :${config.port}`);
+
