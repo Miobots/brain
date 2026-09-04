@@ -11,7 +11,7 @@ import {
 import { config } from "./config.ts";
 import { handleAck } from "./hub.ts";
 import { deviceCommands } from "./command-store.ts";
-import { resetSequencebrain,checksequence } from "./sequence-tracker.ts";
+import { resetSequence, checkSequence } from "./sequence-tracker.ts";
 
 export const wss = new WebSocketServer({
     port: config.port,
@@ -34,7 +34,9 @@ export function startServer(port: number, devToken: string) {
                 : rawdata.byteLength;
 
             if (byteLength > config.max_message_size) {
-                console.log(`[SERVER] Message exceeds maximum size 5MB`);
+                console.log(
+                    `[SERVER] Message exceeds maximum size ${config.max_message_size} bytes`
+                );
                 return;
             }
 
@@ -53,6 +55,14 @@ export function startServer(port: number, devToken: string) {
 
             const envelope = brainData.data;
 
+            // Check if incoming command is expired (B0.5)
+            if (envelope.expires_at && Date.now() >= envelope.expires_at) {
+                console.log(
+                    `[SERVER] Expired command received: topic=${envelope.topic} corr_id=${envelope.corr_id}`
+                );
+                return;
+            }
+
             if (envelope.topic === Topics.SYS_HELLO) {
                 const validation = validateHello(envelope.payload);
                 if (!validation.valid) {
@@ -61,7 +71,9 @@ export function startServer(port: number, devToken: string) {
                         reason: "invalid payload",
                     });
                     ws.send(encode(badWelcome));
-                    console.log(`[SERVER] Invalid hello: ${validation.error} closing server`);
+                    console.log(
+                        `[SERVER] Invalid hello: ${validation.error} closing client`
+                    );
                     ws.close();
                     return;
                 }
@@ -73,7 +85,7 @@ export function startServer(port: number, devToken: string) {
                         reason: "Unauthenticated token",
                     });
                     ws.send(encode(badWelcome));
-                    console.log(`[SERVER] BAD DEV_TOKEN closing server`);
+                    console.log(`[SERVER] BAD DEV_TOKEN closing client`);
                     ws.close();
                     return;
                 }
@@ -95,7 +107,7 @@ export function startServer(port: number, devToken: string) {
                 return;
             }
 
-            if (!checksequence(deviceId, envelope.seq)) {
+            if (!checkSequence(deviceId, envelope.seq, envelope.kind)) {
                 return;
             }
 
@@ -106,9 +118,9 @@ export function startServer(port: number, devToken: string) {
 
         ws.on("close", () => {
             if (deviceId) {
-                resetSequencebrain(deviceId);
+                resetSequence(deviceId);
                 devices.delete(deviceId);
-                console.log(`[Server] Device disconnected ${deviceId}`);
+                console.log(`[SERVER] Device disconnected: ${deviceId}`);
             }
         });
 

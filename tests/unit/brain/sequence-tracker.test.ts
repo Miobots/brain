@@ -1,45 +1,56 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { checksequence, resetSequencebrain } from "../../../src/brain/sequence-tracker.ts";
+import { Kind } from "@miobots/protocol";
+import { checkSequence, resetSequence } from "../../../src/brain/sequence-tracker.ts";
 
 describe("sequence tracker", () => {
     const deviceId = "heart-sequence-test";
 
     afterEach(() => {
-        resetSequencebrain(deviceId);
+        resetSequence(deviceId);
         vi.restoreAllMocks();
     });
 
     it("accepts the first message and the next message in sequence", () => {
-        expect(checksequence(deviceId, 6)).toBe(true);
-        expect(checksequence(deviceId, 7)).toBe(true);
+        expect(checkSequence(deviceId, 6)).toBe(true);
+        expect(checkSequence(deviceId, 7)).toBe(true);
     });
 
     it("accepts a gap and continues from the received sequence", () => {
         const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
-        expect(checksequence(deviceId, 6)).toBe(true);
-        expect(checksequence(deviceId, 8)).toBe(true);
-        expect(checksequence(deviceId, 9)).toBe(true);
+        expect(checkSequence(deviceId, 6)).toBe(true);
+        expect(checkSequence(deviceId, 8)).toBe(true);
+        expect(checkSequence(deviceId, 9)).toBe(true);
         expect(warning).toHaveBeenCalledWith(
             expect.stringContaining("expected=7 received=8"),
         );
     });
 
-    it("rejects an older out-of-order message", () => {
+    it("accepts an older out-of-order event but logs a warning", () => {
         const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
-        expect(checksequence(deviceId, 6)).toBe(true);
-        expect(checksequence(deviceId, 5)).toBe(false);
-        expect(checksequence(deviceId, 7)).toBe(true);
+        expect(checkSequence(deviceId, 6, Kind.EVT)).toBe(true);
+        expect(checkSequence(deviceId, 5, Kind.EVT)).toBe(true);
+        expect(checkSequence(deviceId, 7, Kind.EVT)).toBe(true);
         expect(warning).toHaveBeenCalledWith(
             expect.stringContaining("expected=7 received=5"),
         );
     });
 
-    it("starts a fresh sequence after reset", () => {
-        expect(checksequence(deviceId, 10)).toBe(true);
-        resetSequencebrain(deviceId);
+    it("drops stale telemetry with older sequence", () => {
+        const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
-        expect(checksequence(deviceId, 1)).toBe(true);
+        expect(checkSequence(deviceId, 6, Kind.TELEM)).toBe(true);
+        expect(checkSequence(deviceId, 5, Kind.TELEM)).toBe(false);
+        expect(warning).toHaveBeenCalledWith(
+            expect.stringContaining("STALE TELEMETRY: device=heart-sequence-test"),
+        );
+    });
+
+    it("starts a fresh sequence after reset", () => {
+        expect(checkSequence(deviceId, 10)).toBe(true);
+        resetSequence(deviceId);
+
+        expect(checkSequence(deviceId, 1)).toBe(true);
     });
 });

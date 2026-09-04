@@ -1,40 +1,50 @@
+import { Kind, SequenceGapDetector } from "@miobots/protocol";
 
+const detectors = new Map<string, SequenceGapDetector>();
 
-const lastsequence = new Map<string,number>();
-
-export function resetSequencebrain(deviceid:string){
-    lastsequence.delete(deviceid);
+export function resetSequence(deviceId: string): void {
+    detectors.delete(deviceId);
 }
 
-export function checksequence(deviceid:string,seq:number):boolean{
-    const last = lastsequence.get(deviceid);
-    if (last ===undefined){
-        //first message
-        lastsequence.set(deviceid,seq)
-        return true;
+export function checkSequence(
+    deviceId: string,
+    seq: number,
+    kind: Kind = Kind.EVT,
+): boolean {
+    let detector = detectors.get(deviceId);
+    if (!detector) {
+        detector = new SequenceGapDetector();
+        detectors.set(deviceId, detector);
     }
-    const expectedsequence= last+1;
-    if (seq == expectedsequence){
-        lastsequence.set(deviceid,seq);
-        return true;
-    }
-    //packet has been lost
-    if (seq> expectedsequence){
+
+    const result = detector.evaluate(seq, kind);
+
+    if (result.gap) {
         console.warn(
-            `[SERVER] SEQUENCE GAP: device=${deviceid} ` +
-            `expected=${expectedsequence} received=${seq}`,
+            `[SERVER] SEQUENCE GAP: device=${deviceId} ` +
+            `expected=${result.expectedSeq} received=${result.receivedSeq}` +
+            (result.gapSize > 0 ? ` (missing ${result.gapSize} message(s))` : ""),
         );
-        //we continue from the sequence we recieved
-        lastsequence.set(deviceid,seq);
-        return true;
     }
-    if (seq<expectedsequence){
-            console.warn(
-        `[SERVER] OUT-OF-ORDER MESSAGE: device=${deviceid} ` +
-        `expected=${expectedsequence} received=${seq}`,
-    );
-    //we are still expecting the same next sequence
-    //rn we return false 
+
+    if (result.droppedOldTelemetry) {
+        console.warn(
+            `[SERVER] STALE TELEMETRY: device=${deviceId} ` +
+            `expected=${result.expectedSeq} received=${result.receivedSeq}`,
+        );
+        return false;
     }
-    return false;
+
+    if (seq < result.expectedSeq && !result.droppedOldTelemetry) {
+        console.warn(
+            `[SERVER] OUT-OF-ORDER MESSAGE: device=${deviceId} ` +
+            `expected=${result.expectedSeq} received=${seq}`,
+        );
+    }
+
+    return true;
 }
+
+// Backwards compatibility aliases
+export const resetSequencebrain = resetSequence;
+export const checksequence = checkSequence;
