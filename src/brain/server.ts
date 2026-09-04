@@ -11,6 +11,7 @@ import {
 import { config } from "./config.ts";
 import { handleAck } from "./hub.ts";
 import { deviceCommands } from "./command-store.ts";
+import { resetSequence, checkSequence } from "./sequence-tracker.ts";
 
 export const wss = new WebSocketServer({
     port: config.port,
@@ -19,7 +20,7 @@ export const wss = new WebSocketServer({
 
 export const devices = new Map<string, WebSocket>();
 
-export function startServer(port: number, dev_Token: string) {
+export function startServer(port: number, devToken: string) {
     wss.on("connection", (ws) => {
         let deviceId: string | undefined;
 
@@ -32,7 +33,6 @@ export function startServer(port: number, dev_Token: string) {
                 ? rawdata.reduce((acc, chunk) => acc + chunk.byteLength, 0)
                 : rawdata.byteLength;
 
-            // handles oversized message B0.5 M-50
             if (byteLength > config.max_message_size) {
                 console.log(
                     `[SERVER] Message exceeds maximum size ${config.max_message_size} bytes`
@@ -40,19 +40,20 @@ export function startServer(port: number, dev_Token: string) {
                 return;
             }
 
-            const data = rawdata instanceof ArrayBuffer
-                ? Buffer.from(rawdata)
+            const parseData = typeof rawdata === "string"
+                ? rawdata
+                : Buffer.isBuffer(rawdata)
+                ? rawdata
                 : Array.isArray(rawdata)
                 ? Buffer.concat(rawdata)
-                : rawdata;
-
-            const brain_data = parse(data);
-            if (!brain_data.success) {
-                console.log(`[SERVER] Error: ${brain_data.error}`);
+                : Buffer.from(rawdata);
+            const brainData = parse(parseData);
+            if (!brainData.success) {
+                console.log(`[SERVER] Error: ${brainData.error}`);
                 return;
             }
 
-            const envelope = brain_data.data;
+            const envelope = brainData.data;
 
             // Check if incoming command is expired (B0.5)
             if (envelope.expires_at && Date.now() >= envelope.expires_at) {
@@ -65,11 +66,11 @@ export function startServer(port: number, dev_Token: string) {
             if (envelope.topic === Topics.SYS_HELLO) {
                 const validation = validateHello(envelope.payload);
                 if (!validation.valid) {
-                    const bad_welcome = createWelcomeAck(envelope, {
+                    const badWelcome = createWelcomeAck(envelope, {
                         accepted: false,
                         reason: "invalid payload",
                     });
-                    ws.send(encode(bad_welcome));
+                    ws.send(encode(badWelcome));
                     console.log(
                         `[SERVER] Invalid hello: ${validation.error} closing client`
                     );
@@ -78,47 +79,53 @@ export function startServer(port: number, dev_Token: string) {
                 }
 
                 const hello = envelope.payload as HelloPayload;
-                console.log(`[SERVER] Verified hello payload`);
-
-                // dev token check
-                if (hello.token !== dev_Token) {
-                    const bad_welcome = createWelcomeAck(envelope, {
+                if (hello.token !== devToken) {
+                    const badWelcome = createWelcomeAck(envelope, {
                         accepted: false,
                         reason: "Unauthenticated token",
                     });
-                    ws.send(encode(bad_welcome));
+                    ws.send(encode(badWelcome));
                     console.log(`[SERVER] BAD DEV_TOKEN closing client`);
                     ws.close();
                     return;
                 }
 
-                // Device authenticated
                 deviceId = hello.device_id;
-                devices.set(hello.device_id, ws);
+                devices.set(deviceId, ws);
                 if (!deviceCommands.has(deviceId)) {
                     deviceCommands.set(deviceId, new Map());
                 }
+
                 console.log(`[SERVER] Device authenticated: ${deviceId}`);
                 const welcome = createWelcomeAck(envelope, { accepted: true });
                 ws.send(encode(welcome));
                 console.log(`[SERVER] welcome Ack Sent`);
             }
 
+            if (!deviceId) {
+                console.log(`[SERVER] Message received before authentication`);
+                return;
+            }
+
+            if (!checkSequence(deviceId, envelope.seq, envelope.kind)) {
+                return;
+            }
+
             if (envelope.kind === Kind.ACK) {
                 handleAck(envelope);
-                return;
             }
         });
 
         ws.on("close", () => {
             if (deviceId) {
+                resetSequence(deviceId);
                 devices.delete(deviceId);
                 console.log(`[SERVER] Device disconnected: ${deviceId}`);
             }
         });
 
-        ws.on("error", (err) => {
-            console.log(`[SERVER] Websocket err: ${err}`);
+        ws.on("error", (error) => {
+            console.log(`[SERVER] WebSocket error: ${error}`);
         });
     });
 }
