@@ -1,16 +1,6 @@
-import "./server.ts";
-import { sendCommand } from "./hub.ts";
-import { Topics, Language } from "@miobots/protocol";
+export * from "./server.ts";
+export * from "./hub.ts";
+export * from "./config.ts";
+export * from "./command-store.ts";
+export * from "./sequence-tracker.ts";
 
-await new Promise((resolve) => setTimeout(resolve, 10000));
-
-const ack = await sendCommand(
-    "heart-sim-01",
-    Topics.VOICE_SPEAK,
-    {
-        text: "salam",
-        lang: Language.UR,
-    }
-);
-
-console.log("Command completed:", ack);

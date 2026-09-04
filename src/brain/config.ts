@@ -1,7 +1,9 @@
 import "dotenv/config";
+import { ProtocolDefaults } from "@miobots/protocol";
 
-const port = Number(process.env.PORT) || 8080;
-const devToken = process.env.DEV_TOKEN ?? "test-dev-token";
+const port = Number(process.env.PORT) || ProtocolDefaults.DEFAULT_PORT;
+const devToken = process.env.DEV_TOKEN ?? ProtocolDefaults.DEFAULT_DEV_TOKEN;
+
 const timeout_ms = Number(process.env.ACK_TIMEOUT) || 5000;
 const max_message_size = Number(process.env.MAX_MESSAGE_SIZE) || 5 * 1024 * 1024;
 const idempotency_ttl_ms = Number(process.env.IDEMPOTENCY_TTL_MS) || 10 * 60 * 1000;
