@@ -11,7 +11,7 @@ import {
     type HelloPayload,
 } from "@miobots/protocol";
 import { config } from "./config.ts";
-import { handleAck, sendCommand } from "./hub.ts";
+import { handleAck, handleHeartBeat, sendCommand } from "./hub.ts";
 import { deviceCommands } from "./command-store.ts";
 import { resetSequence, checkSequence } from "./sequence-tracker.ts";
 
@@ -200,6 +200,12 @@ wss.on("connection", (ws) => {
 
         if (envelope.kind === Kind.ACK) {
             handleAck(envelope);
+        }
+        if(envelope.kind === Kind.EVT && envelope.topic=== Topics.SYS_HEARTBEAT){
+            const heartbeat = handleHeartBeat(envelope);
+            if (heartbeat) {
+                ws.send(encode(heartbeat));
+            }
         }
     });
 
