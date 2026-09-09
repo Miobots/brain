@@ -2,6 +2,9 @@ import {
     encode,
     Kind,
     newEnvelope,
+    SystemHealth,
+    Topics,
+    type HeartbeatPayload,
     type Envelope,
 } from "@miobots/protocol";
 import { devices } from "./server.ts";
@@ -74,6 +77,36 @@ export function getExistingCommand(
     }
 
     return undefined;
+}
+
+export function handleHeartBeat(
+    envelope: Envelope<string, unknown>,
+): Envelope<typeof Topics.SYS_HEARTBEAT, HeartbeatPayload> | undefined {
+    const payload = envelope.payload;
+    if (
+        typeof payload !== "object" ||
+        payload === null ||
+        !("status" in payload) ||
+        !("t_wall_ms" in payload) ||
+        !Object.values(SystemHealth).includes(payload.status as SystemHealth) ||
+        typeof payload.t_wall_ms !== "number"
+    ) {
+        console.log("[HUB] Invalid heartbeat payload");
+        return;
+    }
+
+    const heartbeatPayload = payload as HeartbeatPayload;
+    console.log(`[HUB] IN heartbeat status=${heartbeatPayload.status}`);
+
+    return newEnvelope<typeof Topics.SYS_HEARTBEAT, HeartbeatPayload>({
+        kind: Kind.EVT,
+        topic: Topics.SYS_HEARTBEAT,
+        corr_id: envelope.corr_id,
+        payload: {
+            status: SystemHealth.OK,
+            t_wall_ms: Date.now(),
+        },
+    });
 }
 
 export function handleAck(
