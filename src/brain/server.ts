@@ -207,6 +207,12 @@ wss.on("connection", (ws) => {
                 ws.send(encode(heartbeat));
             }
         }
+        if (envelope.kind === Kind.EVT && envelope.topic === Topics.CAP_MANIFEST) {
+            console.log(
+                `[SERVER] Capability manifest received from ${deviceId}:`,
+                JSON.stringify(envelope.payload)
+            );
+        }
     });
 
     ws.on("close", () => {
