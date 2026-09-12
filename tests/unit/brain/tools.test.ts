@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import {
     DeviceRole,
@@ -17,8 +17,8 @@ import {
     getTools,
     getTool,
     registerTool,
-    getDefaultDeviceId,
 } from "../../../src/brain/tools.ts";
+import { config } from "../../../src/brain/config.ts";
 
 // This file simulates one client connection, so one outbound counter (ENVELOPE.md §6).
 const clientSeq = new SequenceCounter();
@@ -36,7 +36,7 @@ function getPort(): number {
     if (addr && typeof addr !== "string") {
         return addr.port;
     }
-    return port;
+    return config.port;
 }
 
 function connectHeart(deviceId = "heart-sim-01") {
@@ -48,7 +48,7 @@ function connectHeart(deviceId = "heart-sim-01") {
                 topic: Topics.SYS_HELLO,
                 payload: {
                     device_id: deviceId,
-                    token,
+                    token: config.devToken,
                     protocol_version: 1,
                     role: DeviceRole.HEART,
                 },
@@ -77,13 +77,7 @@ function connectHeart(deviceId = "heart-sim-01") {
 describe("Brain Tool Registry & Speak Tool (src/brain/tools.ts)", () => {
     beforeAll(async () => {
         serverModule = await import("../../../src/brain/server.ts");
-        serverModule.startServer(port, token);
         await new Promise((r) => setTimeout(r, 50));
-    });
-
-    afterAll(() => {
-        serverModule?.httpServer?.close();
-        serverModule?.wss?.close();
     });
 
     describe("Registry Functions & Definitions", () => {
@@ -170,6 +164,7 @@ describe("Brain Tool Registry & Speak Tool (src/brain/tools.ts)", () => {
                 text: "Assalam-o-Alaikum",
                 lang: "ur",
                 priority: "urgent",
+                device_id: "heart-sim-01",
             })) as Record<string, any>;
 
             expect(result.status).toBe("spoken");
