@@ -24,7 +24,7 @@ export function classifyError(err: unknown): { code: AiErrorCode; message: strin
 
   const message = err instanceof Error ? err.message : String(err);
 
-  if (/missing env var|is required for kind/i.test(message)) return { code: 'not_configured', message };
+  if (/missing env var|is required for kind|invalid provider kind/i.test(message)) return { code: 'not_configured', message };
   if (/abort|timeout/i.test(message)) return { code: 'timeout', message };
   if (/enotfound|econnrefused|econnreset|fetch failed|network/i.test(message)) {
     return { code: 'provider_unreachable', message };
