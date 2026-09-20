@@ -159,7 +159,9 @@ describe("brain WebSocket server", () => {
 		client.close();
 	});
 
-	it("ignores expired incoming commands", async () => {
+	// expires_at < t_wall_ms is malformed, not merely late: the codec refuses it before the Brain
+	// ever sees it, so there is nothing to reply to. The genuinely-late case is the test below.
+	it("drops envelopes the codec rejects as malformed (expires_at precedes t_wall_ms)", async () => {
 		const client = await connect();
 		const expiredCommand = newEnvelope({
 			kind: Kind.CMD,
@@ -181,10 +183,46 @@ describe("brain WebSocket server", () => {
 				const timer = setTimeout(resolve, 100);
 				client.once("message", () => {
 					clearTimeout(timer);
-					reject(new Error("server unexpectedly replied to expired command"));
+					reject(new Error("server unexpectedly replied to a malformed envelope"));
 				});
 			}),
 		).resolves.toBeUndefined();
+		client.close();
+	});
+
+	// ENVELOPE.md §6: "Past it, the receiver rejects with reason `expired` and logs it."
+	// A command that was valid when sent but arrived after its deadline — the reconnect-drain
+	// case. Dropping it silently left the sender waiting for an ACK that was never coming, so a
+	// refusal read as a timeout.
+	it("rejects a genuinely late command with reason 'expired' rather than dropping it", async () => {
+		const client = await connect();
+
+		const sentAt = Date.now() - 10_000;
+		const lateCommand = newEnvelope({
+			kind: Kind.CMD,
+			topic: Topics.VOICE_SPEAK,
+			payload: { text: "go to the kitchen", lang: Language.EN },
+			seq: clientSeq,
+			// Valid when it left (expires_at >= t_wall_ms), long past due on arrival.
+			t_wall_ms: sentAt,
+			expires_at: sentAt + 1_000,
+		});
+
+		const reply = await new Promise<Record<string, any>>((resolve, reject) => {
+			const timer = setTimeout(() => reject(new Error("no rejection ACK arrived")), 1000);
+			client.once("message", (raw: Buffer) => {
+				clearTimeout(timer);
+				resolve(decode(raw) as unknown as Record<string, any>);
+			});
+			client.send(encode(lateCommand));
+		});
+
+		expect(reply.kind).toBe(Kind.ACK);
+		expect(reply.payload.accepted).toBe(false);
+		expect(reply.payload.reason).toBe("expired");
+		// Correlated, so the sender can settle the right pending command.
+		expect(reply.corr_id).toBe(lateCommand.corr_id);
+
 		client.close();
 	});
 });
