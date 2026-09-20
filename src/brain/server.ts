@@ -11,7 +11,10 @@ import {
     Topics,
     validateHello,
     SequenceCounter,
+    DeviceRole,
+    newEnvelope,
     type HelloPayload,
+    type CapabilityManifestPayload,
 } from "@miobots/protocol";
 import { config } from "./config.ts";
 import { createHeartbeat, handleAck, handleHeartBeat, sendCommand } from "./hub.ts";
@@ -30,6 +33,55 @@ export const devices = new Map<string, WebSocket>();
  * ripple through hub.ts, tools.ts and six test files for no behavioural gain.
  */
 export const deviceSeq = new Map<string, SequenceCounter>();
+
+/**
+ * Which registry slot each connection occupies.
+ *
+ * ENVELOPE.md §8: "`role` is one of heart · synapse · ganglion. It tells the hub which registry
+ * slot a connection occupies without inferring it from the device id." The hub read `role` off
+ * sys.hello and threw it away, so it had no way to tell a robot from an app.
+ */
+export const deviceRoles = new Map<string, DeviceRole>();
+
+/**
+ * Last capability manifest seen from each device.
+ *
+ * The manifest was logged and dropped, so Synapse — which renders its entire UI from it — had no
+ * way to receive it at all (TASK_LEDGER.md:500 flags this as blocking I2). Caching also means a
+ * freshly-connected app is not blank until the next publish tick.
+ */
+export const latestManifests = new Map<string, CapabilityManifestPayload>();
+
+/** Sends one envelope to a device on that device's own outbound counter. */
+function sendTo<TTopic extends string, TPayload>(
+    targetId: string,
+    topic: TTopic,
+    payload: TPayload,
+): void {
+    const target = devices.get(targetId);
+    const targetSeq = deviceSeq.get(targetId);
+    if (!target || !targetSeq || target.readyState !== target.OPEN) return;
+
+    target.send(
+        encode(
+            newEnvelope({
+                kind: Kind.EVT,
+                topic,
+                payload: payload as never,
+                seq: targetSeq,
+            }),
+        ),
+    );
+}
+
+/** Forwards a manifest to every connected app. Heart publishes it; Synapse renders it. */
+export function relayManifestToApps(payload: CapabilityManifestPayload): void {
+    for (const [id, role] of deviceRoles) {
+        if (role === DeviceRole.SYNAPSE) {
+            sendTo(id, Topics.CAP_MANIFEST, payload);
+        }
+    }
+}
 
 export const httpServer = http.createServer((req, res) => {
     res.setHeader("Content-Type", "application/json");
@@ -305,6 +357,7 @@ wss.on("connection", (ws) => {
             deviceId = hello.device_id;
             devices.set(deviceId, ws);
             deviceSeq.set(deviceId, outboundSeq);
+            deviceRoles.set(deviceId, hello.role);
             if (!deviceCommands.has(deviceId)) {
                 deviceCommands.set(deviceId, new Map());
             }
@@ -314,6 +367,14 @@ wss.on("connection", (ws) => {
             ws.send(encode(welcome));
             console.log(`[SERVER] welcome Ack Sent`);
             startHeartbeat();
+
+            // An app that has just connected should not stare at a blank screen until the next
+            // publish tick, so replay what we already know.
+            if (hello.role === DeviceRole.SYNAPSE) {
+                for (const cached of latestManifests.values()) {
+                    sendTo(deviceId, Topics.CAP_MANIFEST, cached);
+                }
+            }
         }
 
         if (!deviceId) {
@@ -335,10 +396,13 @@ wss.on("connection", (ws) => {
             }
         }
         if (envelope.kind === Kind.EVT && envelope.topic === Topics.CAP_MANIFEST) {
+            const manifest = envelope.payload as CapabilityManifestPayload;
             console.log(
                 `[SERVER] Capability manifest received from ${deviceId}:`,
-                JSON.stringify(envelope.payload)
+                JSON.stringify(manifest)
             );
+            latestManifests.set(deviceId, manifest);
+            relayManifestToApps(manifest);
         }
     });
 
@@ -348,6 +412,9 @@ wss.on("connection", (ws) => {
             resetSequence(deviceId);
             devices.delete(deviceId);
             deviceSeq.delete(deviceId);
+            deviceRoles.delete(deviceId);
+            // The manifest is deliberately kept: an app must be able to show last-known state
+            // with a staleness marker when the robot is off (TASKS.md S1.2, third row).
             console.log(`[SERVER] Device disconnected: ${deviceId}`);
         }
     });
@@ -356,6 +423,11 @@ wss.on("connection", (ws) => {
         console.log(`[SERVER] WebSocket error: ${error}`);
     });
 });
+
+/** The dev token this server is actually running with — see getPort() in the test suites. */
+export function configuredToken(): string {
+    return config.devToken;
+}
 
 export function startServer(
     port: number = config.port,
