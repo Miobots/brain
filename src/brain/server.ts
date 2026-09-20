@@ -8,6 +8,7 @@ import {
     parse,
     Topics,
     validateHello,
+    SequenceCounter,
     type HelloPayload,
 } from "@miobots/protocol";
 import { config } from "./config.ts";
@@ -16,6 +17,16 @@ import { deviceCommands } from "./command-store.ts";
 import { resetSequence, checkSequence } from "./sequence-tracker.ts";
 
 export const devices = new Map<string, WebSocket>();
+
+/**
+ * One outbound sequence counter per connected device.
+ *
+ * ENVELOPE.md §6: "A process holding several connections keeps one counter per connection — a
+ * single shared counter makes gap detection meaningless the moment Heart, Synapse and Ganglion
+ * are attached at once." Kept alongside `devices` rather than inside it so the change does not
+ * ripple through hub.ts, tools.ts and six test files for no behavioural gain.
+ */
+export const deviceSeq = new Map<string, SequenceCounter>();
 
 export const httpServer = http.createServer((req, res) => {
     res.setHeader("Content-Type", "application/json");
@@ -110,6 +121,8 @@ export const wss = new WebSocketServer({
 
 wss.on("connection", (ws) => {
     let deviceId: string | undefined;
+    // Created per socket, before the handshake: even a rejection ACK counts on this connection.
+    const outboundSeq = new SequenceCounter();
 
     ws.on("message", (rawdata: RawData) => {
         const byteLength = Buffer.isBuffer(rawdata)
@@ -156,6 +169,7 @@ wss.on("connection", (ws) => {
                 const badWelcome = createWelcomeAck(envelope, {
                     accepted: false,
                     reason: "invalid payload",
+                    seq: outboundSeq,
                 });
                 ws.send(encode(badWelcome));
                 console.log(
@@ -170,6 +184,7 @@ wss.on("connection", (ws) => {
                 const badWelcome = createWelcomeAck(envelope, {
                     accepted: false,
                     reason: "Unauthenticated token",
+                    seq: outboundSeq,
                 });
                 ws.send(encode(badWelcome));
                 console.log(`[SERVER] BAD DEV_TOKEN closing client`);
@@ -179,12 +194,13 @@ wss.on("connection", (ws) => {
 
             deviceId = hello.device_id;
             devices.set(deviceId, ws);
+            deviceSeq.set(deviceId, outboundSeq);
             if (!deviceCommands.has(deviceId)) {
                 deviceCommands.set(deviceId, new Map());
             }
 
             console.log(`[SERVER] Device authenticated: ${deviceId}`);
-            const welcome = createWelcomeAck(envelope, { accepted: true });
+            const welcome = createWelcomeAck(envelope, { accepted: true, seq: outboundSeq });
             ws.send(encode(welcome));
             console.log(`[SERVER] welcome Ack Sent`);
         }
@@ -202,7 +218,7 @@ wss.on("connection", (ws) => {
             handleAck(envelope);
         }
         if(envelope.kind === Kind.EVT && envelope.topic=== Topics.SYS_HEARTBEAT){
-            const heartbeat = handleHeartBeat(envelope);
+            const heartbeat = handleHeartBeat(envelope, outboundSeq);
             if (heartbeat) {
                 ws.send(encode(heartbeat));
             }
@@ -219,6 +235,7 @@ wss.on("connection", (ws) => {
         if (deviceId) {
             resetSequence(deviceId);
             devices.delete(deviceId);
+            deviceSeq.delete(deviceId);
             console.log(`[SERVER] Device disconnected: ${deviceId}`);
         }
     });

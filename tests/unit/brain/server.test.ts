@@ -3,11 +3,16 @@ import WebSocket from "ws";
 import {
 	DeviceRole,
 	Kind,
+	Language,
 	Topics,
 	decode,
 	encode,
 	newEnvelope,
+	SequenceCounter,
 } from "@miobots/protocol";
+
+// This file simulates one client connection, so one outbound counter (ENVELOPE.md §6).
+const clientSeq = new SequenceCounter();
 
 const port = 45871;
 const token = "test-dev-token";
@@ -57,6 +62,7 @@ function hello(tokenValue: string, payloadOverrides: Record<string, unknown> = {
 			role: DeviceRole.HEART,
 			...payloadOverrides,
 		},
+		seq: clientSeq,
 	});
 }
 
@@ -117,7 +123,9 @@ describe("brain WebSocket server", () => {
 				newEnvelope({
 					kind: Kind.CMD,
 					topic: Topics.VOICE_SPEAK,
-					payload: { text: "hello" },
+					// SpeakPayload needs a lang; the topic->payload binding now catches this.
+					payload: { text: "hello", lang: Language.EN },
+					seq: clientSeq,
 				}),
 			),
 		);
@@ -162,6 +170,7 @@ describe("brain WebSocket server", () => {
 				protocol_version: 1,
 				role: DeviceRole.HEART,
 			},
+			seq: clientSeq,
 			expires_at: Date.now() - 1000,
 		});
 

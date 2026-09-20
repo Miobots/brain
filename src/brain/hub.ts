@@ -4,10 +4,11 @@ import {
     newEnvelope,
     SystemHealth,
     Topics,
+    SequenceCounter,
     type HeartbeatPayload,
     type Envelope,
 } from "@miobots/protocol";
-import { devices } from "./server.ts";
+import { devices, deviceSeq } from "./server.ts";
 import { randomUUID } from "node:crypto";
 import { config } from "./config.ts";
 import {
@@ -81,6 +82,7 @@ export function getExistingCommand(
 
 export function handleHeartBeat(
     envelope: Envelope<string, unknown>,
+    seq: number | SequenceCounter,
 ): Envelope<typeof Topics.SYS_HEARTBEAT, HeartbeatPayload> | undefined {
     const payload = envelope.payload;
     if (
@@ -102,11 +104,12 @@ export function handleHeartBeat(
         kind: Kind.EVT,
         topic: Topics.SYS_HEARTBEAT,
         corr_id: envelope.corr_id,
+        seq,
         payload: {
             status: SystemHealth.OK,
             t_wall_ms: Date.now(),
         },
-    });
+    }) as Envelope<typeof Topics.SYS_HEARTBEAT, HeartbeatPayload>;
 }
 
 export function handleAck(
@@ -191,12 +194,24 @@ export function sendCommand<T extends string = string, P = unknown>(
         `idem_key=${commandIdemKey}`
     );
 
+    // This device's own outbound counter — never a shared one (ENVELOPE.md §6).
+    const outboundSeq = deviceSeq.get(device_id);
+    if (!outboundSeq) {
+        return Promise.reject(
+            new Error(
+                `[HUB] No outbound sequence counter for ${device_id} — not handshaked`
+            )
+        );
+    }
+
     const env = newEnvelope({
         corr_id,
         idem_key: commandIdemKey,
         kind: Kind.CMD,
         topic,
-        payload,
+        // TTopic is unresolved here, so PayloadFor<T, P> stays a deferred conditional.
+        payload: payload as never,
+        seq: outboundSeq,
         expires_at: commandExpiresAt,
     });
 

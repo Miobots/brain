@@ -14,8 +14,12 @@ import {
   decode,
   encode,
   newEnvelope,
+  SequenceCounter,
   type Envelope,
 } from "@miobots/protocol";
+
+// This file simulates one client connection, so one outbound counter (ENVELOPE.md §6).
+const clientSeq = new SequenceCounter();
 
 process.env.PORT = "45873";
 process.env.DEV_TOKEN = "test-dev-token";
@@ -72,6 +76,7 @@ function helloEnvelope(deviceId = "heart-sim-01") {
       protocol_version: 1,
       role: "heart",
     },
+    seq: clientSeq,
   });
 }
 
@@ -108,7 +113,7 @@ describe("brain hub device registration", () => {
       lang: Language.UR,
     });
 
-    const ack = createAck(command, { accepted: true });
+    const ack = createAck(command, { accepted: true }, clientSeq);
     client.send(encode(ack));
 
     const result = await commandPromise;

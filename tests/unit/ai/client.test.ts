@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { chat, stream } from '../../../src/ai/client';
+import { chat, stream } from '../../../src/ai/client.ts';
 
 describe('AI Client (src/ai/client.ts)', () => {
   const originalEnv = { ...process.env };

@@ -8,8 +8,12 @@ import {
     decode,
     encode,
     newEnvelope,
+    SequenceCounter,
     type Envelope,
 } from "@miobots/protocol";
+
+// This file simulates one client connection, so one outbound counter (ENVELOPE.md §6).
+const clientSeq = new SequenceCounter();
 
 const port = 45874;
 const token = "test-dev-token";
@@ -40,6 +44,7 @@ function connectHeart(deviceId = "heart-sim-01") {
                     protocol_version: 1,
                     role: DeviceRole.HEART,
                 },
+                seq: clientSeq,
             });
             client.send(encode(helloEnv));
         });
@@ -75,7 +80,7 @@ describe("Brain HTTP Dev Speak Endpoint (POST /dev/speak)", () => {
         });
 
         expect(res.status).toBe(400);
-        const data = await res.json();
+        const data = (await res.json()) as any;
         expect(data).toMatchObject({ status: "error", error: expect.stringContaining("Missing or invalid 'text'") });
     });
 
@@ -87,7 +92,7 @@ describe("Brain HTTP Dev Speak Endpoint (POST /dev/speak)", () => {
         });
 
         expect(res.status).toBe(503);
-        const data = await res.json();
+        const data = (await res.json()) as any;
         expect(data).toMatchObject({ status: "error", error: expect.stringContaining("not connected") });
     });
 
@@ -98,7 +103,7 @@ describe("Brain HTTP Dev Speak Endpoint (POST /dev/speak)", () => {
         heart.on("message", (raw) => {
             const env = decode(raw instanceof ArrayBuffer ? Buffer.from(raw) : Array.isArray(raw) ? Buffer.concat(raw) : raw);
             if (env.topic === Topics.VOICE_SPEAK && env.kind === Kind.CMD) {
-                const ack = createAck(env, { accepted: true });
+                const ack = createAck(env, { accepted: true }, clientSeq);
                 heart.send(encode(ack));
             }
         });
@@ -110,7 +115,7 @@ describe("Brain HTTP Dev Speak Endpoint (POST /dev/speak)", () => {
         });
 
         expect(res.status).toBe(200);
-        const data = await res.json();
+        const data = (await res.json()) as any;
         expect(data.status).toBe("acknowledged");
         expect(data.ack.topic).toBe("voice.speak");
         expect(data.ack.kind).toBe("ACK");
@@ -130,7 +135,7 @@ describe("Brain HTTP Dev Speak Endpoint (POST /dev/speak)", () => {
         });
 
         expect(res.status).toBe(504);
-        const data = await res.json();
+        const data = (await res.json()) as any;
         expect(data.status).toBe("error");
         expect(data.error).toContain("timed out");
 
