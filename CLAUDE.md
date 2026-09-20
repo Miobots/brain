@@ -52,13 +52,28 @@ one-time-purchase price tag.
 
 ---
 
-## Run
+## Run (with Bun)
 
 ```bash
-npm install
-npm start        # Node 26 runs TypeScript directly — no build step
-npm test
+bun install      # ALSO re-run this after any change to miobots-protocol — see below
+bun start        # Bun runs TypeScript directly — no build step
+bun test
+bun run typecheck
 ```
+
+**Bun, one lockfile, one pinned TypeScript** — BRAIN_DECISIONS 21. There is no `npm` step in this
+repo; `package-lock.json` is gone and `bun.lock` is the only lockfile.
+
+### Re-run `bun install` after every protocol change
+
+`@miobots/protocol` is a `file:` dependency, and Bun links it as a tree of **per-file symlinks
+created at install time**. Files that existed then stay live; files added to the protocol
+afterwards are simply absent from `node_modules`.
+
+That is not hypothetical: this repo spent two weeks with a `node_modules` tree missing
+`src/topics/capability.ts`, so `topics/index.ts` re-exported a file that was not there. It only
+kept working because Bun resolves through the symlink to the real path — a bundler, Metro, or a
+`tsc` run with `preserveSymlinks` would have failed outright.
 
 ## Build order — this matters more than it looks
 
