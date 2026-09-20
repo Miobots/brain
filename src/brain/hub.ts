@@ -80,10 +80,35 @@ export function getExistingCommand(
     return undefined;
 }
 
+/**
+ * Builds this side's own `sys.heartbeat`. ENVELOPE.md §8 step 4: heartbeats flow "every 5s, both
+ * directions" — the Brain announces its own liveness on a timer rather than only answering when
+ * spoken to, so a Heart can tell a wedged Brain from a quiet one.
+ */
+export function createHeartbeat(
+    seq: number | SequenceCounter,
+): Envelope<typeof Topics.SYS_HEARTBEAT, HeartbeatPayload> {
+    return newEnvelope<typeof Topics.SYS_HEARTBEAT, HeartbeatPayload>({
+        kind: Kind.EVT,
+        topic: Topics.SYS_HEARTBEAT,
+        seq,
+        payload: {
+            status: SystemHealth.OK,
+            t_wall_ms: Date.now(),
+        },
+    }) as Envelope<typeof Topics.SYS_HEARTBEAT, HeartbeatPayload>;
+}
+
+/**
+ * Validates an inbound `sys.heartbeat` and returns its payload, or undefined if it is malformed.
+ *
+ * Returns the payload rather than a reply: the outbound direction is on its own timer now. Echoing
+ * would make the Brain's liveness depend on the Heart still talking, which is precisely the case
+ * the watchdog has to detect.
+ */
 export function handleHeartBeat(
     envelope: Envelope<string, unknown>,
-    seq: number | SequenceCounter,
-): Envelope<typeof Topics.SYS_HEARTBEAT, HeartbeatPayload> | undefined {
+): HeartbeatPayload | undefined {
     const payload = envelope.payload;
     if (
         typeof payload !== "object" ||
@@ -99,17 +124,7 @@ export function handleHeartBeat(
 
     const heartbeatPayload = payload as HeartbeatPayload;
     console.log(`[HUB] IN heartbeat status=${heartbeatPayload.status}`);
-
-    return newEnvelope<typeof Topics.SYS_HEARTBEAT, HeartbeatPayload>({
-        kind: Kind.EVT,
-        topic: Topics.SYS_HEARTBEAT,
-        corr_id: envelope.corr_id,
-        seq,
-        payload: {
-            status: SystemHealth.OK,
-            t_wall_ms: Date.now(),
-        },
-    }) as Envelope<typeof Topics.SYS_HEARTBEAT, HeartbeatPayload>;
+    return heartbeatPayload;
 }
 
 export function handleAck(

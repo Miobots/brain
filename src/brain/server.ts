@@ -9,10 +9,11 @@ import {
     Topics,
     validateHello,
     SequenceCounter,
+    ProtocolDefaults,
     type HelloPayload,
 } from "@miobots/protocol";
 import { config } from "./config.ts";
-import { handleAck, handleHeartBeat, sendCommand } from "./hub.ts";
+import { createHeartbeat, handleAck, handleHeartBeat, sendCommand } from "./hub.ts";
 import { deviceCommands } from "./command-store.ts";
 import { resetSequence, checkSequence } from "./sequence-tracker.ts";
 
@@ -124,6 +125,46 @@ wss.on("connection", (ws) => {
     // Created per socket, before the handshake: even a rejection ACK counts on this connection.
     const outboundSeq = new SequenceCounter();
 
+    // ENVELOPE.md §8: heartbeats flow both directions every 5 s, and three missed beats mean the
+    // link is dead. The Brain previously did neither — it only echoed, so a device that stopped
+    // talking while holding the socket open stayed registered and kept receiving commands that
+    // could never be ACKed.
+    let lastBeatFromDeviceMs = Date.now();
+    let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+
+    function stopHeartbeat(): void {
+        if (heartbeatTimer) {
+            clearInterval(heartbeatTimer);
+            heartbeatTimer = undefined;
+        }
+    }
+
+    function startHeartbeat(): void {
+        stopHeartbeat();
+        lastBeatFromDeviceMs = Date.now();
+
+        heartbeatTimer = setInterval(() => {
+            if (ws.readyState !== ws.OPEN) {
+                stopHeartbeat();
+                return;
+            }
+
+            ws.send(encode(createHeartbeat(outboundSeq)));
+
+            const silentFor = Date.now() - lastBeatFromDeviceMs;
+            if (silentFor >= ProtocolDefaults.HEARTBEAT_TIMEOUT_MS) {
+                console.log(
+                    `[SERVER] Dead link: no heartbeat from ${deviceId} for ` +
+                    `${(silentFor / 1000).toFixed(1)}s ` +
+                    `(>= ${ProtocolDefaults.HEARTBEAT_MISSED_THRESHOLD} missed beats). Closing.`
+                );
+                stopHeartbeat();
+                ws.close();
+            }
+        }, ProtocolDefaults.HEARTBEAT_INTERVAL_MS);
+        heartbeatTimer.unref?.();
+    }
+
     ws.on("message", (rawdata: RawData) => {
         const byteLength = Buffer.isBuffer(rawdata)
             ? rawdata.byteLength
@@ -203,6 +244,7 @@ wss.on("connection", (ws) => {
             const welcome = createWelcomeAck(envelope, { accepted: true, seq: outboundSeq });
             ws.send(encode(welcome));
             console.log(`[SERVER] welcome Ack Sent`);
+            startHeartbeat();
         }
 
         if (!deviceId) {
@@ -217,10 +259,10 @@ wss.on("connection", (ws) => {
         if (envelope.kind === Kind.ACK) {
             handleAck(envelope);
         }
-        if(envelope.kind === Kind.EVT && envelope.topic=== Topics.SYS_HEARTBEAT){
-            const heartbeat = handleHeartBeat(envelope, outboundSeq);
-            if (heartbeat) {
-                ws.send(encode(heartbeat));
+        if (envelope.kind === Kind.EVT && envelope.topic === Topics.SYS_HEARTBEAT) {
+            // Liveness is recorded, not answered. The outbound beat is on its own timer.
+            if (handleHeartBeat(envelope)) {
+                lastBeatFromDeviceMs = Date.now();
             }
         }
         if (envelope.kind === Kind.EVT && envelope.topic === Topics.CAP_MANIFEST) {
@@ -232,6 +274,7 @@ wss.on("connection", (ws) => {
     });
 
     ws.on("close", () => {
+        stopHeartbeat();
         if (deviceId) {
             resetSequence(deviceId);
             devices.delete(deviceId);
