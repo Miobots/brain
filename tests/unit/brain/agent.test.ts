@@ -92,8 +92,8 @@ describe("Brain ReAct Agent Loop (src/brain/agent.ts)", () => {
         expect(res.text).toBe("The calculated sum is 42.");
         expect(res.iterations).toBe(2);
         expect(res.toolCalls).toHaveLength(1);
-        expect(res.toolCalls[0].name).toBe("test_calculator");
-        expect(res.toolCalls[0].result).toEqual({ sum: 42 });
+        expect(res.toolCalls[0]!.name).toBe("test_calculator");
+        expect(res.toolCalls[0]!.result).toEqual({ sum: 42 });
         expect(mockTool.execute).toHaveBeenCalledWith({ a: 20, b: 22 });
         expect(chatSpy).toHaveBeenCalledTimes(2);
     });

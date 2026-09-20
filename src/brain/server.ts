@@ -11,7 +11,6 @@ import {
     Topics,
     validateHello,
     SequenceCounter,
-    ProtocolDefaults,
     type HelloPayload,
 } from "@miobots/protocol";
 import { config } from "./config.ts";

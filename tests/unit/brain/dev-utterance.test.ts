@@ -8,8 +8,12 @@ import {
     decode,
     encode,
     newEnvelope,
+    SequenceCounter,
     type Envelope,
 } from "@miobots/protocol";
+
+// This file simulates one client connection, so one outbound counter (ENVELOPE.md §6).
+const clientSeq = new SequenceCounter();
 import * as aiClient from "../../../src/ai/client.ts";
 import { config } from "../../../src/brain/config.ts";
 
@@ -36,6 +40,7 @@ function connectHeart(deviceId = "heart-sim-01") {
                     protocol_version: 1,
                     role: DeviceRole.HEART,
                 },
+                seq: clientSeq,
             });
             client.send(encode(helloEnv));
         });
@@ -91,10 +96,11 @@ describe("Brain HTTP Dev Utterance Endpoint (POST /dev/utterance)", () => {
 
             if (env.topic === Topics.VOICE_SPEAK && env.kind === Kind.CMD) {
                 receivedCommand = env;
-                const ack = createAck(env, {
-                    accepted: true,
-                    exec_status: "completed",
-                });
+                const ack = createAck(
+                    env,
+                    { accepted: true, exec_status: "completed" },
+                    clientSeq
+                );
                 client.send(encode(ack));
             }
         });

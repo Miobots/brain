@@ -100,10 +100,12 @@ export async function runAgentLoop(req: AgentRequest): Promise<AgentResponse> {
       };
     }
 
-    // Append assistant message indicating the tool calls
+    // The assistant turn must carry the tool calls themselves, not just its text: the tool
+    // results pushed below reference these ids, and a provider rejects results it cannot match.
     messages.push({
       role: "assistant",
       content: chatResult.text ?? "",
+      toolCalls: requestedToolCalls,
     });
 
     // Execute each requested tool call
