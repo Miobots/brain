@@ -14,11 +14,84 @@ import { config } from "./config.ts";
 import { handleAck, handleHeartBeat, sendCommand } from "./hub.ts";
 import { deviceCommands } from "./command-store.ts";
 import { resetSequence, checkSequence } from "./sequence-tracker.ts";
+import { runAgentLoop } from "./agent.ts";
+import { devices } from "./devices.ts";
 
-export const devices = new Map<string, WebSocket>();
+export { devices };
 
 export const httpServer = http.createServer((req, res) => {
     res.setHeader("Content-Type", "application/json");
+
+    if (req.method === "POST" && req.url === "/dev/utterance") {
+        let body = "";
+        let bodyLength = 0;
+
+        req.on("data", (chunk: Buffer) => {
+            bodyLength += chunk.length;
+            if (bodyLength > config.max_message_size) {
+                res.writeHead(413);
+                res.end(JSON.stringify({ error: "Payload too large", status: "error" }));
+                req.destroy();
+                return;
+            }
+            body += chunk.toString("utf-8");
+        });
+
+        req.on("end", async () => {
+            const badRequest = (error: string) => {
+                res.writeHead(400);
+                res.end(JSON.stringify({ error, status: "error" }));
+            };
+
+            let parsed: unknown;
+            try {
+                parsed = JSON.parse(body || "{}");
+            } catch {
+                return badRequest("Malformed JSON body");
+            }
+            if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+                return badRequest("Body must be a JSON object");
+            }
+            const { text, device_id, session_id, user_id } = parsed as Record<string, unknown>;
+
+            if (typeof text !== "string" || text.trim().length === 0) {
+                return badRequest("Missing or invalid 'text' field");
+            }
+            for (const [field, value] of Object.entries({ device_id, session_id, user_id })) {
+                if (value !== undefined && typeof value !== "string") {
+                    return badRequest(`'${field}' must be a string`);
+                }
+            }
+
+            const targetDeviceId =
+                (device_id as string | undefined) ?? (devices.keys().next().value || "heart-sim-01");
+            const sessionId = session_id as string | undefined;
+            const userId = user_id as string | undefined;
+
+            try {
+                const response = await runAgentLoop({
+                    text: text.trim(),
+                    deviceId: targetDeviceId,
+                    sessionId,
+                    userId,
+                });
+
+                const isTimeout = response.error?.includes("timed out") ?? false;
+                res.writeHead(response.ok ? 200 : isTimeout ? 504 : 500);
+                res.end(JSON.stringify(response));
+            } catch (err: unknown) {
+                const errorMessage = err instanceof Error ? err.message : String(err);
+                res.writeHead(500);
+                res.end(
+                    JSON.stringify({
+                        status: "error",
+                        error: errorMessage,
+                    })
+                );
+            }
+        });
+        return;
+    }
 
     if (req.method === "POST" && req.url === "/dev/speak") {
         let body = "";
