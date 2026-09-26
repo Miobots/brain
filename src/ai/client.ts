@@ -31,7 +31,7 @@ import { ProviderKind } from './config.js';
 
 // converts application messages to AI SDK format messages
 // handles all types of messages such as tool calls and normal messages with attachments
-async function toModelMessages(messages: ChatMessage[], kind: ProviderKind): Promise<ModelMessage[]> {
+export async function toModelMessages(messages: ChatMessage[], kind: ProviderKind): Promise<ModelMessage[]> {
   const out: ModelMessage[] = [];
   for (const m of messages) {
     if (m.role === 'tool') {
