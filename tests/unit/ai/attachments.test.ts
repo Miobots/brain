@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { kindOf } from '../../../src/ai/attachments/resolve';
-import type { Attachment } from '../../../src/ai/types';
+import { kindOf } from '../../../src/ai/attachments/resolve.ts';
+import type { Attachment } from '../../../src/ai/types.ts';
 
 describe('kindOf()', () => {
   it('recognizes image by mediaType', () => {

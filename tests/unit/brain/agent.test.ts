@@ -92,8 +92,8 @@ describe("Brain ReAct Agent Loop (src/brain/agent.ts)", () => {
         expect(res.text).toBe("The calculated sum is 42.");
         expect(res.iterations).toBe(2);
         expect(res.toolCalls).toHaveLength(1);
-        expect(res.toolCalls[0].name).toBe("test_calculator");
-        expect(res.toolCalls[0].result).toEqual({ sum: 42 });
+        expect(res.toolCalls[0]!.name).toBe("test_calculator");
+        expect(res.toolCalls[0]!.result).toEqual({ sum: 42 });
         expect(mockTool.execute).toHaveBeenCalledWith({ a: 20, b: 22 });
         expect(chatSpy).toHaveBeenCalledTimes(2);
     });
@@ -228,7 +228,7 @@ describe("Brain ReAct Agent Loop (src/brain/agent.ts)", () => {
 
         expect(registered.execute).not.toHaveBeenCalled();
         expect(custom.execute).toHaveBeenCalledTimes(1);
-        expect(res.toolCalls[0].result).toEqual({ error: "Tool 'global_only' is not registered or executable" });
+        expect(res.toolCalls[0]!.result).toEqual({ error: "Tool 'global_only' is not registered or executable" });
     });
 
     it("clamps maxIterations to the hard cap, and never below one turn", async () => {

@@ -8,10 +8,18 @@ import {
     decode,
     encode,
     newEnvelope,
+    SequenceCounter,
     type Envelope,
 } from "@miobots/protocol";
 import * as aiClient from "../../../src/ai/client.ts";
 import { config } from "../../../src/brain/config.ts";
+
+// This file simulates one client connection, so one outbound counter (ENVELOPE.md §6).
+const clientSeq = new SequenceCounter();
+
+// Own port: vitest runs test files in parallel, and each imports a server that listens.
+process.env.PORT = "45877";
+process.env.DEV_TOKEN = "test-dev-token";
 
 let serverModule: typeof import("../../../src/brain/server.ts");
 
@@ -36,6 +44,7 @@ function connectHeart(deviceId = "heart-sim-01") {
                     protocol_version: 1,
                     role: DeviceRole.HEART,
                 },
+                seq: clientSeq,
             });
             client.send(encode(helloEnv));
         });
@@ -107,7 +116,7 @@ describe("Brain HTTP Dev Utterance Endpoint (POST /dev/utterance)", () => {
                 const ack = createAck(env, {
                     accepted: true,
                     exec_status: "completed",
-                });
+                }, clientSeq);
                 client.send(encode(ack));
             }
         });
