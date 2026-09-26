@@ -8,7 +8,7 @@ import {
     type HeartbeatPayload,
     type Envelope,
 } from "@miobots/protocol";
-import { devices, deviceSeq } from "./server.ts";
+import { devices, deviceSeq } from "./devices.ts";
 import { randomUUID } from "node:crypto";
 import { config } from "./config.ts";
 import {
