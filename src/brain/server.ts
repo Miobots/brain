@@ -1,6 +1,7 @@
 import http from "node:http";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import {
+    createAck,
     createWelcomeAck,
     encode,
     Kind,
@@ -259,10 +260,21 @@ wss.on("connection", (ws) => {
 
         const envelope = brainData.data;
 
-        // Check if incoming command is expired (B0.5)
+        // ENVELOPE.md §6: "Past it, the receiver rejects with reason `expired` and logs it."
+        // Dropping it silently left the sender waiting for an ACK that was never coming, which
+        // reads as a timeout rather than as the refusal it actually is.
         if (envelope.expires_at && Date.now() >= envelope.expires_at) {
             console.log(
                 `[SERVER] Expired command received: topic=${envelope.topic} corr_id=${envelope.corr_id}`
+            );
+            ws.send(
+                encode(
+                    createAck(
+                        envelope,
+                        { accepted: false, reason: "expired" },
+                        outboundSeq
+                    )
+                )
             );
             return;
         }
@@ -351,15 +363,19 @@ wss.on("connection", (ws) => {
     });
 });
 
-export function startServer(port: number = config.port, devToken: string = config.devToken) {
+export function startServer(
+    port: number = config.port,
+    devToken: string = config.devToken,
+    host: string = config.host,
+) {
     if (devToken) {
         config.devToken = devToken;
     }
     if (!httpServer.listening) {
-        httpServer.listen(port, () => {
-            console.log(`listening at ws://localhost:${port}/ws (HTTP on port ${port})...`);
+        httpServer.listen(port, host, () => {
+            console.log(`listening at ws://${host}:${port}/ws (HTTP on ${host}:${port})...`);
         });
     }
 }
 
-startServer(config.port, config.devToken);
+startServer(config.port, config.devToken, config.host);
