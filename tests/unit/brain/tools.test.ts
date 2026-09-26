@@ -23,10 +23,9 @@ import { config } from "../../../src/brain/config.ts";
 // This file simulates one client connection, so one outbound counter (ENVELOPE.md §6).
 const clientSeq = new SequenceCounter();
 
-const port = 45876;
-const token = "test-dev-token";
-process.env.PORT = String(port);
-process.env.DEV_TOKEN = token;
+// Own port: vitest runs test files in parallel, and each imports a server that listens.
+process.env.PORT = "45876";
+process.env.DEV_TOKEN = "test-dev-token";
 process.env.ACK_TIMEOUT = "200";
 
 let serverModule: typeof import("../../../src/brain/server.ts");
