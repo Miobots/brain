@@ -11,6 +11,7 @@ export interface ChatMessage {
   content: string;
   attachments?: Attachment[];
   toolCallId?: string; // required when role === 'tool'
+  toolCalls?: ToolCall[]; // assistant turn that requested tools; must precede their 'tool' results
   name?: string;
 }
  
