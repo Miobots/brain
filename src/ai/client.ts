@@ -50,6 +50,22 @@ async function toModelMessages(messages: ChatMessage[], kind: ProviderKind): Pro
       continue;
     }
 
+    if (m.role === 'assistant' && m.toolCalls?.length) {
+      out.push({
+        role: 'assistant',
+        content: [
+          ...(m.content ? [{ type: 'text' as const, text: m.content }] : []),
+          ...m.toolCalls.map((c) => ({
+            type: 'tool-call' as const,
+            toolCallId: c.id,
+            toolName: c.name,
+            input: c.arguments,
+          })),
+        ],
+      });
+      continue;
+    }
+
     if (!m.attachments?.length) {
       out.push({ role: m.role, content: m.content });
       continue;

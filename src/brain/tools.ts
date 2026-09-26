@@ -3,9 +3,10 @@ import {
   Language,
   Priority,
   type SpeakPayload,
+  type AckPayload,
 } from "@miobots/protocol";
 import { sendCommand } from "./hub.ts";
-import { devices } from "./server.ts";
+import { devices } from "./devices.ts";
 import type { ToolDefinition } from "../ai/types.ts";
 
 /**
@@ -69,6 +70,10 @@ export const speakTool: ToolDefinition = {
     };
 
     const ack = await sendCommand(targetDeviceId, Topics.VOICE_SPEAK, payload);
+    const ackPayload = ack.payload as Partial<AckPayload> | undefined;
+    if (ackPayload?.accepted === false) {
+      throw new Error(`Heart refused voice.speak: ${ackPayload.reason ?? "no reason given"}`);
+    }
 
     return {
       status: "spoken",
