@@ -8,6 +8,7 @@ import {
     decode,
     encode,
     newEnvelope,
+    SequenceCounter,
     type Envelope,
 } from "@miobots/protocol";
 import {
@@ -18,6 +19,14 @@ import {
     registerTool,
 } from "../../../src/brain/tools.ts";
 import { config } from "../../../src/brain/config.ts";
+
+// This file simulates one client connection, so one outbound counter (ENVELOPE.md §6).
+const clientSeq = new SequenceCounter();
+
+// Own port: vitest runs test files in parallel, and each imports a server that listens.
+process.env.PORT = "45876";
+process.env.DEV_TOKEN = "test-dev-token";
+process.env.ACK_TIMEOUT = "200";
 
 let serverModule: typeof import("../../../src/brain/server.ts");
 
@@ -42,6 +51,7 @@ function connectHeart(deviceId = "heart-sim-01") {
                     protocol_version: 1,
                     role: DeviceRole.HEART,
                 },
+                seq: clientSeq,
             });
             client.send(encode(helloEnv));
         });
@@ -72,8 +82,8 @@ describe("Brain Tool Registry & Speak Tool (src/brain/tools.ts)", () => {
     describe("Registry Functions & Definitions", () => {
         it("registers speakTool in toolRegistry", () => {
             expect(toolRegistry.speak).toBeDefined();
-            expect(toolRegistry.speak.name).toBe("speak");
-            expect(toolRegistry.speak.description).toContain("robot");
+            expect(toolRegistry.speak!.name).toBe("speak");
+            expect(toolRegistry.speak!.description).toContain("robot");
         });
 
         it("returns all tools via getTools()", () => {
@@ -140,10 +150,11 @@ describe("Brain Tool Registry & Speak Tool (src/brain/tools.ts)", () => {
 
                 if (env.topic === Topics.VOICE_SPEAK && env.kind === Kind.CMD) {
                     receivedSpeakCommand = env;
-                    const ack = createAck(env, {
-                        accepted: true,
-                        exec_status: "completed",
-                    });
+                    const ack = createAck(
+                        env,
+                        { accepted: true, exec_status: "completed" },
+                        clientSeq
+                    );
                     client.send(encode(ack));
                 }
             });

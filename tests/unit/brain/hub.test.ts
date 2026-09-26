@@ -3,9 +3,13 @@ import {
     Language,
     Topics,
     createAck,
+    SequenceCounter,
     decode,
     type Envelope,
 } from "@miobots/protocol";
+
+// This file simulates one client connection, so one outbound counter (ENVELOPE.md §6).
+const clientSeq = new SequenceCounter();
 
 process.env.PORT = "45872";
 process.env.DEV_TOKEN = "test-dev-token";
@@ -35,7 +39,7 @@ function createConnection(): MockConnection {
 }
 
 function decodeSentCommand(connection: MockConnection): Envelope<string, unknown> {
-    return decode(connection.send.mock.calls[0][0]);
+    return decode(connection.send.mock.calls[0]![0]);
 }
 
 function wait(milliseconds: number): Promise<void> {
@@ -66,11 +70,15 @@ afterAll(() => {
 
 afterEach(() => {
     serverModule.devices.clear();
+    serverModule.deviceSeq.clear();
     commandStoreModule.deviceCommands.clear();
 });
 
 function connectMockDevice(connection = createConnection()): MockConnection {
     serverModule.devices.set(deviceId, connection as never);
+    // Mirror what the handshake does: a registered device owns an outbound counter.
+    // sendCommand refuses to invent one, so a device in `devices` but not `deviceSeq` is a bug.
+    serverModule.deviceSeq.set(deviceId, new SequenceCounter());
     commandStoreModule.deviceCommands.set(deviceId, new Map());
     return connection;
 }
@@ -85,7 +93,7 @@ describe("Brain Hub command idempotency", () => {
         expect(command.corr_id).toEqual(expect.any(String));
         expect(connection.send).toHaveBeenCalledTimes(1);
 
-        const ack = createAck(command, { accepted: true });
+        const ack = createAck(command, { accepted: true }, clientSeq);
         hubModule.handleAck(ack);
 
         await expect(commandPromise).resolves.toBe(ack);
@@ -103,7 +111,7 @@ describe("Brain Hub command idempotency", () => {
         expect(second).toBe(first);
         expect(connection.send).toHaveBeenCalledTimes(1);
 
-        hubModule.handleAck(createAck(command, { accepted: true }));
+        hubModule.handleAck(createAck(command, { accepted: true }, clientSeq));
         await expect(first).resolves.toMatchObject({ corr_id: command.corr_id });
         await expect(second).resolves.toMatchObject({ corr_id: command.corr_id });
     });
@@ -113,7 +121,7 @@ describe("Brain Hub command idempotency", () => {
         const idemKey = "duplicate-resolved";
         const first = hubModule.sendCommand(deviceId, Topics.VOICE_SPEAK, payload, idemKey);
         const command = decodeSentCommand(connection);
-        const ack = createAck(command, { accepted: true });
+        const ack = createAck(command, { accepted: true }, clientSeq);
         hubModule.handleAck(ack);
         await expect(first).resolves.toBe(ack);
 
@@ -170,7 +178,7 @@ describe("Brain Hub command idempotency", () => {
         expect(command.topic).toBe("nav.goto");
         expect(command.payload).toEqual(navPayload);
 
-        const ack = createAck(command, { accepted: true });
+        const ack = createAck(command, { accepted: true }, clientSeq);
         hubModule.handleAck(ack);
 
         await expect(commandPromise).resolves.toBe(ack);

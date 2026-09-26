@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { classifyError } from '../../../src/ai/errors';
+import { classifyError } from '../../../src/ai/errors.ts';
 import { APICallError } from 'ai';
 
 describe('classifyError()', () => {
