@@ -11,14 +11,8 @@ export interface ChatMessage {
   content: string;
   attachments?: Attachment[];
   toolCallId?: string; // required when role === 'tool'
+  toolCalls?: ToolCall[]; // assistant turn that requested tools; must precede their 'tool' results
   name?: string;
-  /**
-   * The tool calls this assistant turn made. REQUIRED when the next messages are tool results:
-   * every provider matches a `tool-result` to a preceding `tool-call` by id, and rejects the
-   * request outright if it cannot. Without this field the second turn of any tool-using loop is
-   * malformed.
-   */
-  toolCalls?: ToolCall[];
 }
  
 export type JsonSchema = Record<string, unknown>;

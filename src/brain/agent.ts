@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { chat } from "../ai/client.ts";
 import type { ChatMessage, ToolCall, ToolDefinition } from "../ai/types.ts";
-import { getTools, getTool } from "./tools.ts";
+import { getTools } from "./tools.ts";
 
 export const DEFAULT_MAX_ITERATIONS = 5;
 
@@ -41,10 +41,17 @@ export interface AgentResponse {
 
 export async function runAgentLoop(req: AgentRequest): Promise<AgentResponse> {
   const correlationId = req.correlationId ?? randomUUID();
-  const maxIterations = req.maxIterations ?? DEFAULT_MAX_ITERATIONS;
+  // The cap is a safety limit: callers may lower it, never raise it or switch the model off.
+  const maxIterations = Math.min(
+    Math.max(1, Math.floor(req.maxIterations ?? DEFAULT_MAX_ITERATIONS) || 1),
+    DEFAULT_MAX_ITERATIONS,
+  );
   const capability = req.capability ?? "fast";
   const systemPrompt = req.systemPrompt ?? SYSTEM_PROMPT;
   const tools = req.tools ?? getTools();
+  // The model sees schemas only. Execution happens once, below, so a physical command is never
+  // sent twice (once by the SDK, once by this loop).
+  const modelTools: ToolDefinition[] = tools.map(({ execute: _execute, ...schema }) => schema);
 
   const messages: ChatMessage[] = [
     { role: "system", content: systemPrompt },
@@ -64,7 +71,7 @@ export async function runAgentLoop(req: AgentRequest): Promise<AgentResponse> {
       userId: req.userId,
       capability,
       messages,
-      tools,
+      tools: modelTools,
     });
 
     if (!chatResult.ok) {
@@ -100,8 +107,7 @@ export async function runAgentLoop(req: AgentRequest): Promise<AgentResponse> {
       };
     }
 
-    // The assistant turn must carry the tool calls themselves, not just its text: the tool
-    // results pushed below reference these ids, and a provider rejects results it cannot match.
+    // Providers reject tool results that are not preceded by the assistant turn requesting them.
     messages.push({
       role: "assistant",
       content: chatResult.text ?? "",
@@ -110,21 +116,36 @@ export async function runAgentLoop(req: AgentRequest): Promise<AgentResponse> {
 
     // Execute each requested tool call
     for (const call of requestedToolCalls) {
-      const toolDef = getTool(call.name);
+      // Resolve from this request's tool set, not the global registry, so the allow-list holds.
+      const toolDef = tools.find((t) => t.name === call.name);
       let toolResult: unknown;
 
-      if (!toolDef || !toolDef.execute) {
+      if (call.result !== undefined) {
+        // A built-in tool the AI client executed itself; record it, don't run it again.
+        toolResult = call.result;
+      } else if (!toolDef || !toolDef.execute) {
         toolResult = { error: `Tool '${call.name}' is not registered or executable` };
       } else {
         try {
+          // The request's device wins over anything the model put in the arguments.
           const toolArgs = {
-            ...(req.deviceId ? { device_id: req.deviceId } : {}),
             ...call.arguments,
+            ...(req.deviceId ? { device_id: req.deviceId } : {}),
           };
           toolResult = await toolDef.execute(toolArgs);
         } catch (err: unknown) {
+          // A Heart refusal or timeout is a physical failure: stop and say so, rather than let
+          // the next model turn paper over it with a cheerful sentence.
           const errMsg = err instanceof Error ? err.message : String(err);
-          toolResult = { error: errMsg };
+          executedToolCalls.push({ id: call.id, name: call.name, arguments: call.arguments, result: { error: errMsg } });
+          return {
+            ok: false,
+            text: `I couldn't do that: ${errMsg}`,
+            correlationId,
+            iterations,
+            toolCalls: executedToolCalls,
+            error: errMsg,
+          };
         }
       }
 
@@ -148,10 +169,11 @@ export async function runAgentLoop(req: AgentRequest): Promise<AgentResponse> {
   // If iteration loop cap was reached
   console.warn(`[AGENT] Reached max iteration limit of ${maxIterations}`);
   return {
-    ok: true,
-    text: finalText || "I completed the maximum allowed actions for this request.",
+    ok: false,
+    text: "I ran out of steps before finishing that request.",
     correlationId,
     iterations,
     toolCalls: executedToolCalls,
+    error: `Reached max iteration limit of ${maxIterations}`,
   };
 }
