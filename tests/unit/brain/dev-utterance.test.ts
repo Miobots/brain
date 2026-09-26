@@ -75,6 +75,19 @@ describe("Brain HTTP Dev Utterance Endpoint (POST /dev/utterance)", () => {
         expect(data.error).toContain("Missing or invalid 'text'");
     });
 
+    it.each([
+        ["malformed JSON", '{"text":'],
+        ["a null body", "null"],
+        ["a non-string device_id", JSON.stringify({ text: "hi", device_id: 42 })],
+    ])("rejects %s with 400, not 500", async (_label, body) => {
+        const res = await fetch(`http://127.0.0.1:${getPort()}/dev/utterance`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body,
+        });
+        expect(res.status).toBe(400);
+    });
+
     it("processes utterance, executes speak tool on Fake Heart, and returns 200 response", async () => {
         const client = await connectHeart("heart-sim-01");
 
