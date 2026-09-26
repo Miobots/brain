@@ -17,7 +17,9 @@ process.env.PORT = String(port);
 process.env.DEV_TOKEN = token;
 process.env.ACK_TIMEOUT = "200";
 
+import { config } from "../../../src/brain/config.ts";
 let serverModule: typeof import("../../../src/brain/server.ts");
+let prevTimeout: number;
 
 function getPort(): number {
     const addr = serverModule?.wss?.address();
@@ -57,6 +59,8 @@ function connectHeart(deviceId = "heart-sim-01") {
 
 describe("Brain HTTP Dev Speak Endpoint (POST /dev/speak)", () => {
     beforeAll(async () => {
+        prevTimeout = config.timeout_ms;
+        config.timeout_ms = 200;
         serverModule = await import("../../../src/brain/server.ts");
         await new Promise<void>((resolve) => {
             if (serverModule.wss.address()) {
@@ -65,6 +69,10 @@ describe("Brain HTTP Dev Speak Endpoint (POST /dev/speak)", () => {
                 serverModule.wss.once("listening", resolve);
             }
         });
+    });
+
+    afterAll(() => {
+        config.timeout_ms = prevTimeout;
     });
 
     it("rejects POST /dev/speak with 400 when text is missing or empty", async () => {
