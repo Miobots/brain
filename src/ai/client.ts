@@ -8,7 +8,7 @@
  * Turn-level retry policy, backoff timing, and user feedback are owned by the caller / agent loop (`src/brain/agent.ts`).
  */
 
-import { generateText, streamText, jsonSchema, type ModelMessage, type ToolSet } from 'ai';
+import { generateText, streamText, jsonSchema, type ModelMessage, type SystemModelMessage, type ToolSet } from 'ai';
 import { resolveModel } from './providers/resolve.js';
 import { resolveAttachments } from './attachments/resolve.js';
 import { builtinTools } from './tools/index.js';
@@ -77,6 +77,18 @@ export async function toModelMessages(messages: ChatMessage[], kind: ProviderKin
   return out;
 }
 
+// AI SDK v7 rejects system messages inside `messages` ("Use the instructions option instead"), so
+// they are lifted out into `instructions`. Every conversation the agent builds starts with one.
+export async function toPrompt(
+  messages: ChatMessage[],
+  kind: ProviderKind
+): Promise<{ instructions?: SystemModelMessage[]; messages: ModelMessage[] }> {
+  const all = await toModelMessages(messages, kind);
+  const instructions = all.filter((m): m is SystemModelMessage => m.role === 'system');
+  const rest = all.filter((m) => m.role !== 'system');
+  return instructions.length ? { instructions, messages: rest } : { messages: rest };
+}
+
 // converts application tool definition into AI SDK format
 function toToolSet(tools: ToolDefinition[] | undefined): ToolSet | undefined {
   const all = [...builtinTools, ...(tools ?? [])];
@@ -124,14 +136,14 @@ function mapFinishReason(r: string | undefined): FinishReason {
 export async function chat(req: ChatRequest): Promise<ChatResult> {
   try {
     const { model, provider, modelName, kind } = resolveModel(req.capability);
-    const messages = await toModelMessages(req.messages, kind);
+    const prompt = await toPrompt(req.messages, kind);
     const tools = toToolSet(req.tools);
     const aiToolChoice = toAiSdkToolChoice(req.toolChoice);
 
     const started = Date.now();
     const raw = await generateText({
       model,
-      messages,
+      ...prompt,
       ...(tools ? { tools } : {}),
       ...(aiToolChoice ? { toolChoice: aiToolChoice } : {}),
       ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
@@ -193,14 +205,14 @@ export async function chat(req: ChatRequest): Promise<ChatResult> {
 export async function stream(req: ChatRequest): Promise<StreamHandle> {
   try {
     const { model, provider, modelName, kind } = resolveModel(req.capability);
-    const messages = await toModelMessages(req.messages, kind);
+    const prompt = await toPrompt(req.messages, kind);
     const tools = toToolSet(req.tools);
     const aiToolChoice = toAiSdkToolChoice(req.toolChoice);
     const started = Date.now();
 
     const raw = streamText({
       model,
-      messages,
+      ...prompt,
       ...(tools ? { tools } : {}),
       ...(aiToolChoice ? { toolChoice: aiToolChoice } : {}),
       ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
