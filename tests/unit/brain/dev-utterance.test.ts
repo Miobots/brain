@@ -11,11 +11,15 @@ import {
     SequenceCounter,
     type Envelope,
 } from "@miobots/protocol";
+import * as aiClient from "../../../src/ai/client.ts";
+import { config } from "../../../src/brain/config.ts";
 
 // This file simulates one client connection, so one outbound counter (ENVELOPE.md §6).
 const clientSeq = new SequenceCounter();
-import * as aiClient from "../../../src/ai/client.ts";
-import { config } from "../../../src/brain/config.ts";
+
+// Own port: vitest runs test files in parallel, and each imports a server that listens.
+process.env.PORT = "45877";
+process.env.DEV_TOKEN = "test-dev-token";
 
 let serverModule: typeof import("../../../src/brain/server.ts");
 
@@ -80,6 +84,19 @@ describe("Brain HTTP Dev Utterance Endpoint (POST /dev/utterance)", () => {
         expect(data.error).toContain("Missing or invalid 'text'");
     });
 
+    it.each([
+        ["malformed JSON", '{"text":'],
+        ["a null body", "null"],
+        ["a non-string device_id", JSON.stringify({ text: "hi", device_id: 42 })],
+    ])("rejects %s with 400, not 500", async (_label, body) => {
+        const res = await fetch(`http://127.0.0.1:${getPort()}/dev/utterance`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body,
+        });
+        expect(res.status).toBe(400);
+    });
+
     it("processes utterance, executes speak tool on Fake Heart, and returns 200 response", async () => {
         const client = await connectHeart("heart-sim-01");
 
@@ -96,11 +113,10 @@ describe("Brain HTTP Dev Utterance Endpoint (POST /dev/utterance)", () => {
 
             if (env.topic === Topics.VOICE_SPEAK && env.kind === Kind.CMD) {
                 receivedCommand = env;
-                const ack = createAck(
-                    env,
-                    { accepted: true, exec_status: "completed" },
-                    clientSeq
-                );
+                const ack = createAck(env, {
+                    accepted: true,
+                    exec_status: "completed",
+                }, clientSeq);
                 client.send(encode(ack));
             }
         });

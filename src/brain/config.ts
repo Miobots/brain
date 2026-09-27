@@ -1,18 +1,6 @@
 import "dotenv/config";
 import { ProtocolDefaults } from "@miobots/protocol";
 
-/**
- * Lazily-read configuration.
- *
- * Getters rather than constants so a test can override a value after the module has been
- * imported — the hub and server are module singletons, so reading eagerly froze whatever the
- * environment happened to say at import time.
- *
- * Every wire-level limit falls back to ProtocolDefaults, never to a local literal. A second copy
- * of a protocol constant is a second thing to keep right: the Brain used to cap messages at 5 MB
- * while the codec capped them at 64 KB, so anything in between passed here and died in parse().
- */
-
 let _port: number | undefined;
 let _host: string | undefined;
 let _devToken: string | undefined;
@@ -29,11 +17,9 @@ export const config = {
     set port(val: number) {
         _port = val;
     },
-    /**
-     * Loopback by default. CLAUDE.md: "the token, not the network path, is the security boundary"
-     * — and /dev/speak carries no token, so it must not be reachable from the LAN unless someone
-     * decides that on purpose.
-     */
+    // Loopback by default. CLAUDE.md: "the token, not the network path, is the security boundary" —
+    // and /dev/speak carries no token, so it must not be reachable from the LAN without someone
+    // deciding that on purpose.
     get host(): string {
         return _host ?? (process.env.HOST ?? "127.0.0.1");
     },
@@ -47,11 +33,13 @@ export const config = {
         _devToken = val;
     },
     get timeout_ms(): number {
-        return _timeout_ms ?? (Number(process.env.ACK_TIMEOUT) || ProtocolDefaults.DEFAULT_COMMAND_TIMEOUT_MS);
+        return _timeout_ms ?? (Number(process.env.ACK_TIMEOUT) || 5000);
     },
     set timeout_ms(val: number) {
         _timeout_ms = val;
     },
+    // Derived, not re-declared. A local 5 MB cap against the protocol's own 64 KB meant anything in
+    // between passed the Brain's check and then died inside parse() — two limits for one rule.
     get max_message_size(): number {
         return _max_message_size ?? (Number(process.env.MAX_MESSAGE_SIZE) || ProtocolDefaults.MAX_MESSAGE_BYTES);
     },

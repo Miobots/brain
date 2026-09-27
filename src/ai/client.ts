@@ -50,16 +50,19 @@ export async function toModelMessages(messages: ChatMessage[], kind: ProviderKin
       continue;
     }
 
-    // An assistant turn that made tool calls must carry them as content parts. Providers match
-    // each tool-result to its tool-call by id; a bare text assistant message followed by tool
-    // results is rejected ("tool_result without matching tool_use").
     if (m.role === 'assistant' && m.toolCalls?.length) {
-      const parts: Array<{ type: 'text'; text: string } | { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown }> = [];
-      if (m.content) parts.push({ type: 'text', text: m.content });
-      for (const call of m.toolCalls) {
-        parts.push({ type: 'tool-call', toolCallId: call.id, toolName: call.name, input: call.arguments });
-      }
-      out.push({ role: 'assistant', content: parts } as ModelMessage);
+      out.push({
+        role: 'assistant',
+        content: [
+          ...(m.content ? [{ type: 'text' as const, text: m.content }] : []),
+          ...m.toolCalls.map((c) => ({
+            type: 'tool-call' as const,
+            toolCallId: c.id,
+            toolName: c.name,
+            input: c.arguments,
+          })),
+        ],
+      });
       continue;
     }
 
@@ -74,17 +77,8 @@ export async function toModelMessages(messages: ChatMessage[], kind: ProviderKin
   return out;
 }
 
-/**
- * Converts application tool definitions into AI SDK format — **declaration only**.
- *
- * `execute` is deliberately NOT forwarded. Passing it made `generateText` run the tool itself,
- * and the agent loop then ran it again from `chatResult.toolCalls`, so every tool fired twice:
- * the robot spoke twice and two CMDs crossed the wire per request.
- *
- * Dispatch belongs to the agent loop, which is the only place that can enforce the iteration cap,
- * record what ran, and surface a tool error as an observation rather than as a thrown request.
- */
-export function toToolSet(tools: ToolDefinition[] | undefined): ToolSet | undefined {
+// converts application tool definition into AI SDK format
+function toToolSet(tools: ToolDefinition[] | undefined): ToolSet | undefined {
   const all = [...builtinTools, ...(tools ?? [])];
   if (!all.length) return undefined;
 
@@ -93,6 +87,7 @@ export function toToolSet(tools: ToolDefinition[] | undefined): ToolSet | undefi
     set[t.name] = {
       description: t.description,
       inputSchema: jsonSchema(t.parameters),
+      ...(t.execute ? { execute: (input: Record<string, unknown>) => t.execute!(input) } : {}),
     };
   }
   return set;

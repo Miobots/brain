@@ -1,13 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { toModelMessages, toToolSet } from '../../../src/ai/client.ts';
-import type { ChatMessage, ToolDefinition } from '../../../src/ai/types.ts';
+import { toModelMessages } from '../../../src/ai/client.ts';
+import type { ChatMessage } from '../../../src/ai/types.ts';
 
 /**
  * The agent loop's own tests mock `chat()` wholesale, so nothing ever checked the shape of the
  * messages that would actually be sent. Both of the bugs below were invisible to a green suite:
  * they only appear on the SECOND iteration of a tool-using run, against a real provider.
  *
- * No API key needed — these assert the request we would build, not a response.
+ * No API key needed — these assert the request we would build, not a response. That the model is
+ * given schemas only (no double execution) is covered in tests/unit/brain/agent.test.ts.
  */
 describe('ModelMessage shape for a tool-using turn', () => {
   const toolCallId = 'call-1';
@@ -65,30 +66,5 @@ describe('ModelMessage shape for a tool-using turn', () => {
     );
 
     expect(messages[0]!.content).toBe('Walaikum assalam.');
-  });
-});
-
-describe('Tool declarations sent to the provider', () => {
-  const speak: ToolDefinition = {
-    name: 'speak',
-    description: 'Say something out loud.',
-    parameters: { type: 'object', properties: { text: { type: 'string' } } },
-    execute: async () => ({ status: 'spoken' }),
-  };
-
-  it('declares tools without an executor, so the SDK cannot run them', () => {
-    // The double-execution bug: the SDK ran the tool during generateText, then the agent loop ran
-    // it again from chatResult.toolCalls. Every tool fired twice — two CMDs on the wire, and the
-    // robot said it twice. Dispatch belongs to the agent loop alone.
-    const set = toToolSet([speak])!;
-
-    expect(set.speak).toBeDefined();
-    expect(set.speak).not.toHaveProperty('execute');
-  });
-
-  it('still passes the description and input schema through', () => {
-    const set = toToolSet([speak])!;
-    expect(set.speak!.description).toBe('Say something out loud.');
-    expect(set.speak!.inputSchema).toBeDefined();
   });
 });
