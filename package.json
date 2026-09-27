@@ -14,7 +14,7 @@
     "build": "tsc",
     "start": "bun run src/index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
-    "test": "vitest"
+    "test": "bun test"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.29",
