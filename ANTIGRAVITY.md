@@ -19,8 +19,11 @@
 ## Toolchain & Commands (Bun)
 
 ```bash
-bun install        # Install dependencies (links @miobots/protocol)
+bun install        # Install dependencies (links @miobots/protocol) — re-run after ANY protocol change
 bun test           # Run tests
 bun run typecheck  # Typecheck
 bun run src/index.ts # Start Brain hub
 ```
+
+`@miobots/protocol` is a `file:` dependency linked as per-file symlinks at install time; files added to
+the protocol afterwards are missing from `node_modules` until `bun install` runs again (see `CLAUDE.md`).

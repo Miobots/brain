@@ -7,10 +7,10 @@ import {
     Kind,
     Language,
     parse,
-    ProtocolDefaults,
     Topics,
     validateHello,
     SequenceCounter,
+    ProtocolDefaults,
     DeviceRole,
     newEnvelope,
     type HelloPayload,
@@ -21,18 +21,9 @@ import { createHeartbeat, handleAck, handleHeartBeat, sendCommand } from "./hub.
 import { deviceCommands } from "./command-store.ts";
 import { resetSequence, checkSequence } from "./sequence-tracker.ts";
 import { runAgentLoop } from "./agent.ts";
+import { devices, deviceSeq } from "./devices.ts";
 
-export const devices = new Map<string, WebSocket>();
-
-/**
- * One outbound sequence counter per connected device.
- *
- * ENVELOPE.md §6: "A process holding several connections keeps one counter per connection — a
- * single shared counter makes gap detection meaningless the moment Heart, Synapse and Ganglion
- * are attached at once." Kept alongside `devices` rather than inside it so the change does not
- * ripple through hub.ts, tools.ts and six test files for no behavioural gain.
- */
-export const deviceSeq = new Map<string, SequenceCounter>();
+export { devices, deviceSeq };
 
 /**
  * Which registry slot each connection occupies.
@@ -102,19 +93,37 @@ export const httpServer = http.createServer((req, res) => {
         });
 
         req.on("end", async () => {
+            const badRequest = (error: string) => {
+                res.writeHead(400);
+                res.end(JSON.stringify({ error, status: "error" }));
+            };
+
+            let parsed: unknown;
             try {
-                const parsed = JSON.parse(body || "{}");
-                const text = parsed.text;
-                const targetDeviceId = parsed.device_id ?? (devices.keys().next().value || "heart-sim-01");
-                const sessionId = parsed.session_id;
-                const userId = parsed.user_id;
+                parsed = JSON.parse(body || "{}");
+            } catch {
+                return badRequest("Malformed JSON body");
+            }
+            if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+                return badRequest("Body must be a JSON object");
+            }
+            const { text, device_id, session_id, user_id } = parsed as Record<string, unknown>;
 
-                if (typeof text !== "string" || text.trim().length === 0) {
-                    res.writeHead(400);
-                    res.end(JSON.stringify({ error: "Missing or invalid 'text' field", status: "error" }));
-                    return;
+            if (typeof text !== "string" || text.trim().length === 0) {
+                return badRequest("Missing or invalid 'text' field");
+            }
+            for (const [field, value] of Object.entries({ device_id, session_id, user_id })) {
+                if (value !== undefined && typeof value !== "string") {
+                    return badRequest(`'${field}' must be a string`);
                 }
+            }
 
+            const targetDeviceId =
+                (device_id as string | undefined) ?? (devices.keys().next().value || "heart-sim-01");
+            const sessionId = session_id as string | undefined;
+            const userId = user_id as string | undefined;
+
+            try {
                 const response = await runAgentLoop({
                     text: text.trim(),
                     deviceId: targetDeviceId,
@@ -122,7 +131,8 @@ export const httpServer = http.createServer((req, res) => {
                     userId,
                 });
 
-                res.writeHead(response.ok ? 200 : 500);
+                const isTimeout = response.error?.includes("timed out") ?? false;
+                res.writeHead(response.ok ? 200 : isTimeout ? 504 : 500);
                 res.end(JSON.stringify(response));
             } catch (err: unknown) {
                 const errorMessage = err instanceof Error ? err.message : String(err);
@@ -338,11 +348,7 @@ wss.on("connection", (ws) => {
             }
 
             const hello = envelope.payload as HelloPayload;
-            if (
-                hello.token !== config.devToken &&
-                hello.token !== process.env.DEV_TOKEN &&
-                hello.token !== ProtocolDefaults.DEFAULT_DEV_TOKEN
-            ) {
+            if (hello.token !== config.devToken) {
                 const badWelcome = createWelcomeAck(envelope, {
                     accepted: false,
                     reason: "Unauthenticated token",

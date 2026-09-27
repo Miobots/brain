@@ -131,7 +131,9 @@ describe("Brain ReAct Agent Loop (src/brain/agent.ts)", () => {
             correlationId: "corr-loop",
         });
 
-        expect(res.ok).toBe(true);
+        // Hitting the cap means no final answer was produced: that is not a success.
+        expect(res.ok).toBe(false);
+        expect(res.error).toContain("max iteration");
         expect(res.iterations).toBe(DEFAULT_MAX_ITERATIONS);
         expect(res.toolCalls).toHaveLength(5);
         expect(chatSpy).toHaveBeenCalledTimes(5);
@@ -156,5 +158,102 @@ describe("Brain ReAct Agent Loop (src/brain/agent.ts)", () => {
         expect(res.ok).toBe(false);
         expect(res.error).toBe("Provider rate limit reached");
         expect(res.iterations).toBe(1);
+    });
+
+    const toolTurn = (name: string, args: Record<string, unknown>) => ({
+        ok: true as const,
+        correlationId: "c",
+        toolCalls: [{ id: "call-x", name, arguments: args }],
+        files: [],
+        finishReason: "tool_calls" as const,
+        provider: "mock-prov",
+        model: "mock-model",
+        capability: "fast",
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+        latencyMs: 1,
+    });
+    const textTurn = (text: string) => ({ ...toolTurn("", {}), toolCalls: undefined, text, finishReason: "stop" as const });
+
+    it("gives the model schemas only, and executes each tool call exactly once", async () => {
+        const execute = vi.fn().mockResolvedValue({ done: true });
+        const tool = { name: "once_tool", description: "d", parameters: { type: "object" }, execute };
+        chatSpy = vi.spyOn(aiClient, "chat")
+            .mockResolvedValueOnce(toolTurn("once_tool", {}))
+            .mockResolvedValueOnce(textTurn("done"));
+
+        await runAgentLoop({ text: "go", tools: [tool] });
+
+        for (const [req] of chatSpy.mock.calls) {
+            for (const t of (req as any).tools) expect(t.execute).toBeUndefined();
+        }
+        expect(execute).toHaveBeenCalledTimes(1);
+    });
+
+    it("sends the assistant tool-call turn before its tool result", async () => {
+        const tool = { name: "t", description: "d", parameters: { type: "object" }, execute: vi.fn().mockResolvedValue("r") };
+        chatSpy = vi.spyOn(aiClient, "chat")
+            .mockResolvedValueOnce(toolTurn("t", { a: 1 }))
+            .mockResolvedValueOnce(textTurn("done"));
+
+        await runAgentLoop({ text: "go", tools: [tool] });
+
+        const messages = (chatSpy.mock.calls[1][0] as any).messages;
+        const i = messages.findIndex((m: any) => m.role === "assistant");
+        expect(messages[i].toolCalls).toEqual([{ id: "call-x", name: "t", arguments: { a: 1 } }]);
+        expect(messages[i + 1]).toMatchObject({ role: "tool", toolCallId: "call-x" });
+    });
+
+    it("the request's deviceId beats a device_id the model made up", async () => {
+        const execute = vi.fn().mockResolvedValue({});
+        const tool = { name: "t", description: "d", parameters: { type: "object" }, execute };
+        chatSpy = vi.spyOn(aiClient, "chat")
+            .mockResolvedValueOnce(toolTurn("t", { device_id: "someone-elses-heart" }))
+            .mockResolvedValueOnce(textTurn("done"));
+
+        await runAgentLoop({ text: "go", tools: [tool], deviceId: "heart-sim-01" });
+
+        expect(execute).toHaveBeenCalledWith({ device_id: "heart-sim-01" });
+    });
+
+    it("only dispatches tools from this request's tool set", async () => {
+        const registered = { name: "global_only", description: "d", parameters: { type: "object" }, execute: vi.fn() };
+        registerTool(registered);
+        const custom = { name: "custom_only", description: "d", parameters: { type: "object" }, execute: vi.fn().mockResolvedValue("ok") };
+        chatSpy = vi.spyOn(aiClient, "chat")
+            .mockResolvedValueOnce(toolTurn("global_only", {}))
+            .mockResolvedValueOnce(toolTurn("custom_only", {}))
+            .mockResolvedValueOnce(textTurn("done"));
+
+        const res = await runAgentLoop({ text: "go", tools: [custom] });
+
+        expect(registered.execute).not.toHaveBeenCalled();
+        expect(custom.execute).toHaveBeenCalledTimes(1);
+        expect(res.toolCalls[0]!.result).toEqual({ error: "Tool 'global_only' is not registered or executable" });
+    });
+
+    it("clamps maxIterations to the hard cap, and never below one turn", async () => {
+        const tool = { name: "t", description: "d", parameters: { type: "object" }, execute: vi.fn().mockResolvedValue({}) };
+        chatSpy = vi.spyOn(aiClient, "chat").mockImplementation(async () => toolTurn("t", {}));
+
+        expect((await runAgentLoop({ text: "go", tools: [tool], maxIterations: 100 })).iterations).toBe(DEFAULT_MAX_ITERATIONS);
+        expect((await runAgentLoop({ text: "go", tools: [tool], maxIterations: 0 })).iterations).toBe(1);
+        expect((await runAgentLoop({ text: "go", tools: [tool], maxIterations: -3 })).iterations).toBe(1);
+    });
+
+    it("a Heart refusal fails the request instead of being talked over", async () => {
+        const tool = {
+            name: "t", description: "d", parameters: { type: "object" },
+            execute: vi.fn().mockRejectedValue(new Error("Heart refused voice.speak: muted")),
+        };
+        chatSpy = vi.spyOn(aiClient, "chat")
+            .mockResolvedValueOnce(toolTurn("t", {}))
+            .mockResolvedValueOnce(textTurn("All done!"));
+
+        const res = await runAgentLoop({ text: "go", tools: [tool] });
+
+        expect(res.ok).toBe(false);
+        expect(res.error).toContain("muted");
+        expect(res.text).not.toBe("All done!");
+        expect(chatSpy).toHaveBeenCalledTimes(1);
     });
 });
