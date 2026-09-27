@@ -13,8 +13,11 @@ every path that sends a command must handle refusal gracefully and explain it to
 **Node and TypeScript only. No Python anywhere in this component** — stricter than the Heart
 ruling, and deliberately so.
 
-**`llm.ts` is the only file permitted to import a vendor SDK.** If a second file imports it, the
-swap-in-one-file property is already gone and nobody notices until the swap is attempted.
+**No vendor SDK import may appear outside `src/ai/providers/kinds/`** (BRAIN_DECISIONS 14, which
+replaced the older "`llm.ts` is the only file" rule). Each kind exports one `build*Model()` behind
+a shared `LanguageModel` type, so swapping a vendor touches one directory with one signature. Import
+one anywhere else and that property is already gone, and nobody notices until the swap is
+attempted.
 
 **Memory grounding is enforced in code, not in the prompt.** If retrieval returns zero rows, the
 language model is **never called** — return "I have no record of that". A robot inventing where
@@ -56,6 +59,7 @@ one-time-purchase price tag.
 
 ```bash
 bun install      # ALSO re-run this after any change to miobots-protocol — see below
+cp .env.example .env   # /dev/utterance needs AI_PROVIDER_GROQ_API_KEY (the `fast` capability)
 bun start        # Bun runs TypeScript directly — no build step
 bun test
 bun run typecheck
@@ -84,7 +88,8 @@ protocol simultaneously is how a weekend disappears.
 1. `hub.ts` — WebSocket server, dev-token check, `sendCommand` that resolves on ACK and **rejects
    on timeout**. A command that vanishes must error, never hang.
 2. Prove it with a hardcoded send, no LLM.
-3. `llm.ts`, `tools.ts` (one tool: `speak`), `agent.ts` with a capped iteration count.
+3. `src/ai/`, `src/brain/tools.ts` (one tool: `speak`), `src/brain/agent.ts` with a capped
+   iteration count.
 4. Done means: `curl -X POST localhost:8080/dev/utterance -d '{"text":"say salam in urdu"}'` makes
    the fake robot speak.
 
@@ -95,8 +100,21 @@ upgrade a measured before-and-after rather than one unanchored number.
 
 ## Current state
 
-**Scaffold only.** `src/index.ts` prints a line and exits. Postgres is not wired up and should not
-be until there is something to store.
+See the vault's `STATUS.md` for the project's state; this covers only what is true inside this repo.
+
+Landed: the hub with token handshake, heartbeats and a dead-link watchdog (`server.ts`);
+`sendCommand()` with correlation, timeout, idempotency and expiry (`hub.ts`, `command-store.ts`);
+sequence-gap detection; the AI layer (`src/ai/`); the tool registry with `speak` (`tools.ts`); the
+ReAct loop capped at five iterations (`agent.ts`); and the capability manifest — the Heart's half
+relayed to apps, and the Brain's own half published every 10 s (`capabilities.ts`).
+
+**Postgres is not wired up**, and should not be until there is something to store. The Brain's half
+of the manifest says so honestly: memory and smart home publish `unavailable`.
+
+**The mocked tests cannot see provider behaviour.** The agent tests mock `chat()`, so two bugs only
+appeared on the first real call (B1.4): AI SDK v7 rejecting a system message inside `messages`,
+and Groq retiring the configured model. `tests/unit/ai/instructions.test.ts` now runs the prompt
+through the SDK's own validation with its mock model.
 
 ## Where the design lives
 
