@@ -24,6 +24,8 @@
    - [Subsystem 4: Idempotency Store & Expiry Reaper (`src/brain/command-store.ts`)](#subsystem-4-idempotency-store--expiry-reaper-srcbraincommand-storets)
    - [Subsystem 5: Per-Device Sequence Tracker (`src/brain/sequence-tracker.ts`)](#subsystem-5-per-device-sequence-tracker-srcbrainsequence-trackerts)
    - [Subsystem 6: Capability-Based AI Interface (`src/ai/`)](#subsystem-6-capability-based-ai-interface-srcai)
+   - [Subsystem 7: Agent Loop & Tools](#subsystem-7-agent-loop--tools-srcbrainagentts-srcbraintoolsts)
+   - [Subsystem 8: The Brain's Manifest Half](#subsystem-8-the-brains-manifest-half-srcbraincapabilitiests)
 6. [Testing & Verification Protocol](#6-testing--verification-protocol)
 7. [Brain Engineering Roadmap: What Comes Next?](#7-brain-engineering-roadmap-what-comes-next)
 
@@ -101,14 +103,18 @@ repos/miobots-brain/
 │   │   ├── command-store.ts     # 10-min Idempotency store & auto-cleanup reaper
 │   │   ├── sequence-tracker.ts  # Per-connection packet gap & stale telemetry detector
 │   │   ├── hub.ts               # Command Dispatcher & Correlation Tracker (sendCommand)
-│   │   ├── server.ts            # HTTP API router (POST /dev/speak) & WebSocket server
+│   │   ├── server.ts            # HTTP router (/dev/speak, /dev/utterance, /health) & WebSocket hub
+│   │   ├── devices.ts           # Connected devices and their per-connection counters
+│   │   ├── tools.ts             # Tool registry — `speak` dispatches voice.speak to the Heart
+│   │   ├── agent.ts             # ReAct loop, capped at five iterations
+│   │   ├── capabilities.ts      # The Brain's half of cap.manifest
 │   │   └── index.ts             # Clean barrel exports
-│   ├── db/                      # (Phase 2) Postgres schema & pgvector memory engine
+│   │   (no db/ yet — Postgres waits until there is something to store)
 │   └── index.ts                 # Package root entry point
 ├── tests/
 │   └── unit/
 │       ├── ai/                  # AI client, error, and attachment test suites
-│       └── brain/               # Server, hub, idempotency, sequence, and dev-speak tests
+│       └── brain/               # Server, hub, heartbeat, sequence, dev endpoints, agent, tools, manifest relay
 ├── bun.lock                     # Pinned Bun lockfile
 └── package.json                 # Package manifests & scripts
 ```
@@ -211,8 +217,11 @@ Imports `ProtocolDefaults` from `@miobots/protocol` to ensure default port (`808
 
 ### Subsystem 2: Unified HTTP & WS Server (`src/brain/server.ts`)
 - Implements `POST /dev/speak` endpoint handling body parsing, size guards, device online checks, and `sendCommand()` resolution.
+- Implements `POST /dev/utterance`, which hands the text to the agent loop and returns its reply and tool calls.
 - Exposes `GET /health` with connected device list.
-- Validates `sys.hello` against `DEV_TOKEN` and protocol version 1.
+- Validates `sys.hello` against `DEV_TOKEN` and protocol version 1, and records each connection's `role`.
+- Sends a heartbeat every 5 s and closes a connection that has been silent for 15 s (three missed beats).
+- Relays the Heart's `cap.manifest` to every connected app, and publishes the Brain's own half every 10 s.
 
 ### Subsystem 3: Command Dispatcher (`src/brain/hub.ts`)
 Handles `corr_id` tracking, 5000 ms timeout promises, and inbound ACK routing.
@@ -223,6 +232,15 @@ Maintains per-device 10-minute idempotency caches with automatic periodic cleanu
 ### Subsystem 5: Sequence Tracker (`src/brain/sequence-tracker.ts`)
 Wraps `@miobots/protocol`'s `SequenceGapDetector` to monitor packet continuity for each connected device.
 
+### Subsystem 6: Capability-Based AI Interface (`src/ai/`)
+Callers ask for a *capability* (`fast`, `reasoning`, `cheap`, `vision`), never a vendor. `.env` binds each capability to a provider and model (`AI_FAST_PROVIDER`, `AI_FAST_MODEL`), and vendor SDKs are imported only in `src/ai/providers/kinds/`. System messages are passed to the SDK as `instructions`, because AI SDK v7 rejects them inside `messages`.
+
+### Subsystem 7: Agent Loop & Tools (`src/brain/agent.ts`, `src/brain/tools.ts`)
+The model sees tool **schemas only**; the loop executes each requested tool exactly once, so a physical command is never sent twice. A Heart refusal or timeout stops the loop and is reported, rather than papered over by the next model turn. The loop is capped at five iterations.
+
+### Subsystem 8: The Brain's Manifest Half (`src/brain/capabilities.ts`)
+`brainManifest()` states the cloud side as it is: the laptop daemon is `available` only while a Ganglion is connected; memory and smart home are `unavailable` with a reason, because neither exists yet.
+
 ---
 
 ## 6. Testing & Verification Protocol
@@ -230,7 +248,7 @@ Wraps `@miobots/protocol`'s `SequenceGapDetector` to monitor packet continuity f
 Brain uses **Bun** as its package manager and test runner:
 
 ```bash
-# Run full unit test suite (34 tests across 7 files)
+# Run full unit test suite (83 tests across 15 files)
 cd repos/miobots-brain
 bun test
 
@@ -251,7 +269,11 @@ bun run typecheck
 | **`B0.5`** | Idempotency & Expiry | 10-min duplicate cache, payload size limit, expired reject | ✅ **Done** |
 | **`B0.6`** | Sequence Tracker | Gap detection and stale telemetry dropping | ✅ **Done** |
 | **`B0.4`** | ⛳ **Milestone I1** | `POST /dev/speak` 3-terminal live transport verification | ✅ **Done** |
-| **`B1.1`** | AI Provider Polish | Close PR #4 items (fail taxonomy, retry policy, kind validation) | ⏳ Up Next (M1-W2) |
-| **`B1.2`** | Tool Registry | Register `speak()`, `get_battery()`, `get_pose()` tools | ⏳ Up Next (M1-W2) |
-| **`B1.3`** | Agent Core Loop | Conversational ReAct agent loop with 5-iteration cap | ⏳ Up Next (M1-W2) |
-| **`B1.4`** | Brain v0 Acceptance | `POST /dev/utterance -d '{"text":"say salam in urdu"}'` | ⏳ Milestone ⛳ **I2** |
+| **`B1.1`** | AI Provider Polish | Close PR #4 items (fail taxonomy, retry policy, kind validation) | ✅ **Done** |
+| **`B1.2`** | Tool Registry | Register `speak()` | ✅ **Done** |
+| **`B1.3`** | Agent Core Loop | Conversational ReAct agent loop with 5-iteration cap | ✅ **Done** |
+| **`B1.4`** | Brain v0 Acceptance | `POST /dev/utterance -d '{"text":"say salam in urdu"}'` against a real provider | ✅ **Done** |
+| **`B2.1`** | Navigation as a Goal | `navigate_to` returns on ACK; completion arrives as an event | ⏳ Up Next (M1-W3) |
+| **`B2.3`** | Physical Context | Inject room, battery and manifest into every turn | ⏳ Up Next (M1-W3) |
+
+The live checklist is `03 Engineering/Project/TASKS.md` in the vault; this table is a snapshot.
