@@ -22,6 +22,7 @@ import { deviceCommands } from "./command-store.ts";
 import { resetSequence, checkSequence } from "./sequence-tracker.ts";
 import { runAgentLoop } from "./agent.ts";
 import { devices, deviceSeq } from "./devices.ts";
+import { brainManifest } from "./capabilities.ts";
 
 export { devices, deviceSeq };
 
@@ -73,6 +74,17 @@ export function relayManifestToApps(payload: CapabilityManifestPayload): void {
         }
     }
 }
+
+/**
+ * The Brain publishes its own half on the same 10 s tick as the Heart's (BRAIN_DECISIONS 23). The
+ * app treats a half as fresh only while it keeps arriving, so this timer is what "the Brain is up"
+ * means to it.
+ */
+export const brainManifestTimer = setInterval(
+    () => relayManifestToApps(brainManifest(deviceRoles.values())),
+    ProtocolDefaults.CAP_MANIFEST_INTERVAL_MS,
+);
+brainManifestTimer.unref?.();
 
 export const httpServer = http.createServer((req, res) => {
     res.setHeader("Content-Type", "application/json");
@@ -376,10 +388,13 @@ wss.on("connection", (ws) => {
 
             // An app that has just connected should not stare at a blank screen until the next
             // publish tick, so replay what we already know.
+            // Only devices still connected: replaying a robot that has since gone would stamp it
+            // fresh on the app, and the app would show it as available for three ticks.
             if (hello.role === DeviceRole.SYNAPSE) {
-                for (const cached of latestManifests.values()) {
-                    sendTo(deviceId, Topics.CAP_MANIFEST, cached);
+                for (const [sourceId, cached] of latestManifests) {
+                    if (devices.has(sourceId)) sendTo(deviceId, Topics.CAP_MANIFEST, cached);
                 }
+                sendTo(deviceId, Topics.CAP_MANIFEST, brainManifest(deviceRoles.values()));
             }
         }
 

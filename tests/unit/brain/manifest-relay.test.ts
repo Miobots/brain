@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
+import { brainManifest } from "../../../src/brain/capabilities.ts";
 import {
     DeviceRole,
     Kind,
@@ -9,6 +10,7 @@ import {
     newEnvelope,
     SequenceCounter,
     HeartCapabilities,
+    BrainCapabilities,
     type CapabilityManifestPayload,
 } from "@miobots/protocol";
 
@@ -76,12 +78,13 @@ describe("Capability manifest relay", () => {
         return ws;
     }
 
+    /** Next manifest from the Heart's half — the Brain's own half is interleaved on the same topic. */
     function nextManifest(ws: WebSocket, timeoutMs = 1500): Promise<CapabilityManifestPayload> {
         return new Promise((resolve, reject) => {
             const timer = setTimeout(() => reject(new Error("no manifest relayed")), timeoutMs);
             const onMessage = (raw: Buffer) => {
                 const env = decode(raw) as unknown as Record<string, any>;
-                if (env.topic === Topics.CAP_MANIFEST) {
+                if (env.topic === Topics.CAP_MANIFEST && !(BrainCapabilities.MEMORY in env.payload.capabilities)) {
                     clearTimeout(timer);
                     ws.off("message", onMessage);
                     resolve(env.payload as CapabilityManifestPayload);
@@ -177,5 +180,78 @@ describe("Capability manifest relay", () => {
         // TASKS.md S1.2 row 3: robot off, app still useful — it shows last-known state.
         expect(serverModule.latestManifests.get("relay-heart-4")).toBeDefined();
         expect(serverModule.deviceRoles.has("relay-heart-4")).toBe(false);
+    });
+
+    /** Every manifest that arrives within `windowMs`. */
+    async function manifestsWithin(ws: WebSocket, windowMs: number): Promise<CapabilityManifestPayload[]> {
+        const seen: CapabilityManifestPayload[] = [];
+        const onMessage = (raw: Buffer) => {
+            const env = decode(raw) as unknown as Record<string, any>;
+            if (env.topic === Topics.CAP_MANIFEST) seen.push(env.payload);
+        };
+        ws.on("message", onMessage);
+        await new Promise((r) => setTimeout(r, windowMs));
+        ws.off("message", onMessage);
+        return seen;
+    }
+
+    async function helloAsApp(deviceId: string): Promise<WebSocket> {
+        const app = new WebSocket(`ws://127.0.0.1:${getPort()}/ws`);
+        await new Promise<void>((resolve) => app.once("open", () => resolve()));
+        app.send(
+            encode(
+                newEnvelope({
+                    kind: Kind.CMD,
+                    topic: Topics.SYS_HELLO,
+                    payload: { device_id: deviceId, token: serverModule.configuredToken(), protocol_version: 1, role: DeviceRole.SYNAPSE },
+                    seq: new SequenceCounter(),
+                }),
+            ),
+        );
+        return app;
+    }
+
+    it("sends the Brain's own half to an app as soon as it connects", async () => {
+        // S1.2 row 3 is unreachable without this: the app could never tell "Brain up, robot off".
+        const app = await helloAsApp("relay-app-5");
+        const seen = await manifestsWithin(app, 300);
+
+        const brainHalf = seen.find((m) => BrainCapabilities.MEMORY in m.capabilities);
+        expect(brainHalf).toBeDefined();
+        expect(Object.keys(brainHalf!.capabilities).sort()).toEqual(
+            Object.values(BrainCapabilities).sort(),
+        );
+
+        app.close();
+    });
+
+    it("does not replay a robot that has since disconnected", async () => {
+        const heart = await connectAs("relay-heart-6", DeviceRole.HEART);
+        publishManifest(heart, new SequenceCounter(95));
+        await new Promise((r) => setTimeout(r, 150));
+        heart.close();
+        await new Promise((r) => setTimeout(r, 200));
+
+        // Replaying it would stamp the robot fresh, and the app would show it available for 30 s.
+        const app = await helloAsApp("relay-app-6");
+        const seen = await manifestsWithin(app, 300);
+
+        expect(seen.some((m) => HeartCapabilities.DRIVING in m.capabilities)).toBe(false);
+        app.close();
+    });
+});
+
+describe("The Brain's half of the manifest", () => {
+    it("says why each capability it cannot back is unavailable", () => {
+        const manifest = brainManifest([DeviceRole.HEART]);
+        for (const status of Object.values(manifest.capabilities)) {
+            if (status.state === "unavailable") expect(status.reason).toBeTruthy();
+        }
+        expect(manifest.capabilities[BrainCapabilities.LAPTOP_DAEMON]!.state).toBe("unavailable");
+    });
+
+    it("reports the laptop daemon available only while Ganglion is connected", () => {
+        const manifest = brainManifest([DeviceRole.HEART, DeviceRole.GANGLION]);
+        expect(manifest.capabilities[BrainCapabilities.LAPTOP_DAEMON]).toEqual({ state: "available" });
     });
 });
