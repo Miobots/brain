@@ -7,6 +7,7 @@ import {
 } from "@miobots/protocol";
 import { sendCommand } from "./hub.ts";
 import { devices } from "./devices.ts";
+import { cancelNavigation, navigateTo } from "./navigation.ts";
 import type { ToolDefinition } from "../ai/types.ts";
 
 /**
@@ -86,9 +87,65 @@ export const speakTool: ToolDefinition = {
   },
 };
 
+export const navigateToTool: ToolDefinition = {
+  name: "navigate_to",
+  description: "Start driving to a region and return a goal ID immediately while progress arrives later.",
+  parameters: {
+    type: "object",
+    properties: {
+      region: {
+        type: "string",
+        description: "The named region to drive to, such as kitchen.",
+      },
+    },
+    required: ["region"],
+  },
+  execute: async (args: Record<string, unknown>) => {
+    const region = typeof args.region === "string" ? args.region.trim() : "";
+    if (!region) throw new Error("Missing or empty 'region' argument for navigate_to tool");
+
+    const deviceId = getTargetDeviceId(args.device_id);
+    return navigateTo(deviceId, region);
+  },
+};
+
+export const cancelNavigationTool: ToolDefinition = {
+  name: "cancel_navigation",
+  description: "Cancel an active navigation goal using its goal ID.",
+  parameters: {
+    type: "object",
+    properties: {
+      goal_id: {
+        type: "string",
+        description: "The goal ID returned by navigate_to.",
+      },
+    },
+    required: ["goal_id"],
+  },
+  execute: async (args: Record<string, unknown>) => {
+    const goalId = typeof args.goal_id === "string" ? args.goal_id.trim() : "";
+    if (!goalId) throw new Error("Missing or empty 'goal_id' argument for cancel_navigation tool");
+
+    const deviceId = getOptionalDeviceId(args.device_id);
+    return cancelNavigation(deviceId, goalId);
+  },
+};
+
 export const toolRegistry: Record<string, ToolDefinition> = {
   speak: speakTool,
+  navigate_to: navigateToTool,
+  cancel_navigation: cancelNavigationTool,
 };
+
+function getTargetDeviceId(value: unknown): string {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : getDefaultDeviceId();
+}
+
+function getOptionalDeviceId(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
 
 export function getTools(): ToolDefinition[] {
   return Object.values(toolRegistry);

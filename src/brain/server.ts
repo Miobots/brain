@@ -23,6 +23,11 @@ import { resetSequence, checkSequence } from "./sequence-tracker.ts";
 import { runAgentLoop } from "./agent.ts";
 import { devices, deviceSeq } from "./devices.ts";
 import { brainManifest } from "./capabilities.ts";
+import {
+    clearNavigationForDevice,
+    handleNavigationFeedback,
+    handleNavigationResult,
+} from "./navigation.ts";
 
 export { devices, deviceSeq };
 
@@ -425,12 +430,19 @@ wss.on("connection", (ws) => {
             latestManifests.set(deviceId, manifest);
             relayManifestToApps(manifest);
         }
+        if (envelope.kind === Kind.EVT && envelope.topic === Topics.NAV_FEEDBACK) {
+            handleNavigationFeedback(deviceId, envelope);
+        }
+        if (envelope.kind === Kind.EVT && envelope.topic === Topics.NAV_RESULT) {
+            handleNavigationResult(deviceId, envelope);
+        }
     });
 
     ws.on("close", () => {
         stopHeartbeat();
         if (deviceId) {
             resetSequence(deviceId);
+            clearNavigationForDevice(deviceId);
             devices.delete(deviceId);
             deviceSeq.delete(deviceId);
             deviceRoles.delete(deviceId);
