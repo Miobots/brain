@@ -24,7 +24,6 @@ import { runAgentLoop } from "./agent.ts";
 import { devices, deviceSeq } from "./devices.ts";
 import { brainManifest } from "./capabilities.ts";
 import {
-    clearNavigationForDevice,
     handleNavigationFeedback,
     handleNavigationResult,
 } from "./navigation.ts";
@@ -442,7 +441,6 @@ wss.on("connection", (ws) => {
         stopHeartbeat();
         if (deviceId) {
             resetSequence(deviceId);
-            clearNavigationForDevice(deviceId);
             devices.delete(deviceId);
             deviceSeq.delete(deviceId);
             deviceRoles.delete(deviceId);

@@ -9,7 +9,7 @@ import {
 import { Topics } from "@miobots/protocol";
 import { sendCommand } from "./hub.ts";
 
-export type NavigationStatus = "in_progress" | "cancelling";
+export type NavigationStatus = "pending" | "in_progress" | "cancelling";
 
 export type ActiveNavigation = {
     device_id: string;
@@ -46,58 +46,69 @@ function nextGoalId(): string {
 export async function navigateTo(
     device_id: string,
     region: string,
-): Promise<{ goal_id: string; status: "in_progress"; target_device: string; ack: AckPayload | unknown }> {
+): Promise<{ goal_id: string; status: "in_progress"; target_device: string; ack: AckPayload }> {
     const goal_id = nextGoalId();
     if (hasActiveGoal(device_id)) {
         throw new Error(`[NAV] A navigation goal is already active for ${device_id}`);
     }
 
-    const payload: NavGotoPayload = { region, goal_id };
-    const ack = await sendCommand(device_id, Topics.NAV_GOTO, payload);
-    const ackPayload = asAckPayload(ack.payload);
-    if (ackPayload?.accepted !== true) {
-        throw new NavigationRefusalError(
-            ackPayload?.reason ?? "unknown_reason",
-            ackPayload?.details ?? {},
-        );
-    }
-
-    activeNavigationGoals.set(goalKey(device_id, goal_id), {
+    const pendingGoal: ActiveNavigation = {
         device_id,
         goal_id,
-        corr_id: ack.corr_id,
-        status: "in_progress",
-    });
-    console.log(`[NAV] Goal started device=${device_id} goal_id=${goal_id}`);
+        corr_id: "",
+        status: "pending",
+    };
+    activeNavigationGoals.set(goalKey(device_id, goal_id), pendingGoal);
 
-    return { goal_id, status: "in_progress", target_device: device_id, ack: ack.payload };
+    const payload: NavGotoPayload = { region, goal_id };
+    try {
+        const ack = await sendCommand(device_id, Topics.NAV_GOTO, payload);
+        const ackPayload = asAckPayload(ack.payload);
+        if (ackPayload?.accepted !== true) {
+            throw new NavigationRefusalError(
+                ackPayload?.reason ?? "unknown_reason",
+                ackPayload?.details ?? {},
+            );
+        }
+
+        pendingGoal.corr_id = ack.corr_id;
+        pendingGoal.status = "in_progress";
+        console.log(`[NAV] Goal started device=${device_id} goal_id=${goal_id}`);
+
+        return { goal_id, status: "in_progress", target_device: device_id, ack: ackPayload };
+    } catch (error) {
+        if (activeNavigationGoals.get(goalKey(device_id, goal_id)) === pendingGoal) {
+            activeNavigationGoals.delete(goalKey(device_id, goal_id));
+        }
+        throw error;
+    }
 }
 
 export async function cancelNavigation(
     device_id: string | undefined,
-    goal_id: string,
-): Promise<{ goal_id: string; status: "cancelling"; ack: AckPayload | unknown }> {
+    goal_id?: string,
+): Promise<{ goal_id: string; status: "cancelling"; ack: AckPayload }> {
     const goal = findGoal(device_id, goal_id);
     if (!goal) {
-        throw new Error(`[NAV] No active navigation goal: ${goal_id}`);
+        throw new Error(`[NAV] No active navigation goal${goal_id ? `: ${goal_id}` : ""}`);
     }
     if (goal.status === "cancelling") {
-        return { goal_id, status: "cancelling", ack: { accepted: true } };
+        return { goal_id: goal.goal_id, status: "cancelling", ack: { accepted: true } };
     }
 
     goal.status = "cancelling";
     try {
-        const ack = await sendCommand(goal.device_id, Topics.NAV_CANCEL, { goal_id });
+        const ack = await sendCommand(goal.device_id, Topics.NAV_CANCEL, { goal_id: goal.goal_id });
         const ackPayload = asAckPayload(ack.payload);
         if (ackPayload?.accepted !== true) {
             goal.status = "in_progress";
             throw new Error(`Heart refused nav.cancel: ${ackPayload?.reason ?? "unknown_reason"}`);
         }
 
-        console.log(`[NAV] Cancellation accepted device=${device_id} goal_id=${goal_id}`);
-        return { goal_id, status: "cancelling", ack: ack.payload };
+        console.log(`[NAV] Cancellation accepted device=${goal.device_id} goal_id=${goal.goal_id}`);
+        return { goal_id: goal.goal_id, status: "cancelling", ack: ackPayload };
     } catch (error) {
-        if (activeNavigationGoals.get(goalKey(goal.device_id, goal_id)) === goal) {
+        if (activeNavigationGoals.get(goalKey(goal.device_id, goal.goal_id)) === goal) {
             goal.status = "in_progress";
         }
         throw error;
@@ -114,15 +125,15 @@ export function handleNavigationFeedback(
         return false;
     }
 
-    const goal = activeNavigationGoals.get(goalKey(device_id, payload.goal_id));
-    if (!goal || goal.corr_id !== event.corr_id) {
-        console.log(`[NAV] Ignoring unmatched feedback goal_id=${payload.goal_id}`);
+    const goal = findGoalByCorrelation(device_id, event.corr_id);
+    if (!goal) {
+        console.log(`[NAV] Ignoring unmatched feedback corr_id=${event.corr_id}`);
         return false;
     }
 
     goal.latest_feedback = payload;
     console.log(
-        `[NAV] Feedback device=${device_id} goal_id=${payload.goal_id} ` +
+        `[NAV] Feedback device=${device_id} goal_id=${goal.goal_id} ` +
         `distance_remaining_m=${payload.distance_remaining_m}`,
     );
     return true;
@@ -138,15 +149,14 @@ export function handleNavigationResult(
         return false;
     }
 
-    const key = goalKey(device_id, payload.goal_id);
-    const goal = activeNavigationGoals.get(key);
-    if (!goal || goal.corr_id !== event.corr_id) {
-        console.log(`[NAV] Ignoring unmatched result goal_id=${payload.goal_id}`);
+    const goal = findGoalByCorrelation(device_id, event.corr_id);
+    if (!goal) {
+        console.log(`[NAV] Ignoring unmatched result corr_id=${event.corr_id}`);
         return false;
     }
 
-    activeNavigationGoals.delete(key);
-    console.log(`[NAV] Result device=${device_id} goal_id=${payload.goal_id} status=${payload.status}`);
+    activeNavigationGoals.delete(goalKey(device_id, goal.goal_id));
+    console.log(`[NAV] Result device=${device_id} goal_id=${goal.goal_id} success=${payload.success}`);
     return true;
 }
 
@@ -157,10 +167,17 @@ export function hasActiveGoal(device_id: string): boolean {
     return false;
 }
 
-function findGoal(device_id: string | undefined, goal_id: string): ActiveNavigation | undefined {
-    if (device_id) return activeNavigationGoals.get(goalKey(device_id, goal_id));
+function findGoal(device_id: string | undefined, goal_id?: string): ActiveNavigation | undefined {
+    if (device_id && goal_id) return activeNavigationGoals.get(goalKey(device_id, goal_id));
     for (const goal of activeNavigationGoals.values()) {
-        if (goal.goal_id === goal_id) return goal;
+        if ((!device_id || goal.device_id === device_id) && (!goal_id || goal.goal_id === goal_id)) return goal;
+    }
+    return undefined;
+}
+
+function findGoalByCorrelation(device_id: string, corr_id: string): ActiveNavigation | undefined {
+    for (const goal of activeNavigationGoals.values()) {
+        if (goal.device_id === device_id && goal.corr_id === corr_id) return goal;
     }
     return undefined;
 }
@@ -178,16 +195,19 @@ function asAckPayload(payload: unknown): AckPayload | undefined {
 
 function isFeedbackPayload(payload: unknown): payload is NavFeedbackPayload {
     return isRecord(payload)
-        && typeof payload.goal_id === "string"
-        && typeof payload.distance_remaining_m === "number";
+        && typeof payload.distance_remaining_m === "number"
+        && typeof payload.estimated_time_remaining_s === "number";
 }
 
 function isResultPayload(payload: unknown): payload is NavResultPayload {
     return isRecord(payload)
-        && typeof payload.goal_id === "string"
-        && (payload.status === "reached"
-            || payload.status === "cancelled"
-            || payload.status === "failed");
+        && typeof payload.success === "boolean"
+        && typeof payload.total_time_s === "number"
+        && isRecord(payload.final_pose)
+        && typeof payload.final_pose.x === "number"
+        && typeof payload.final_pose.y === "number"
+        && typeof payload.final_pose.yaw === "number"
+        && (payload.reason === undefined || typeof payload.reason === "string");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -74,8 +74,8 @@ describe("Brain navigation lifecycle", () => {
         expect(handleNavigationFeedback(
             deviceId,
             navigationEvent("nav.feedback", command.corr_id, {
-                goal_id: result.goal_id,
                 distance_remaining_m: 3,
+                estimated_time_remaining_s: 3,
             }),
         )).toBe(true);
         expect(goal?.latest_feedback?.distance_remaining_m).toBe(3);
@@ -101,8 +101,10 @@ describe("Brain navigation lifecycle", () => {
         expect(handleNavigationResult(
             deviceId,
             navigationEvent("nav.result", gotoCommand.corr_id, {
-                goal_id: goal.goal_id,
-                status: "cancelled",
+                success: false,
+                total_time_s: 1,
+                final_pose: { x: 0, y: 0, yaw: 0 },
+                reason: "cancelled",
             }),
         )).toBe(true);
         expect(activeNavigationGoals.has(`${deviceId}:${goal.goal_id}`)).toBe(false);
@@ -140,10 +142,47 @@ describe("Brain navigation lifecycle", () => {
         expect(handleNavigationResult(
             deviceId,
             navigationEvent("nav.result", "wrong-correlation", {
-                goal_id: goal.goal_id,
-                status: "reached",
+                success: true,
+                total_time_s: 1,
+                final_pose: { x: 1, y: 2, yaw: 0 },
             }),
         )).toBe(false);
+        expect(activeNavigationGoals.has(`${deviceId}:${goal.goal_id}`)).toBe(true);
+    });
+
+    it("reserves the device before the first navigation ACK arrives", async () => {
+        const connection = connectDevice();
+        const first = navigateTo(deviceId, "kitchen");
+        await expect(navigateTo(deviceId, "hallway")).rejects.toThrow(/already active/);
+
+        const firstCommand = decodeCommand(connection);
+        handleAck(createAck(firstCommand, { accepted: true }, heartSeq));
+        await first;
+    });
+
+    it("cancels the device's active goal when no goal ID is supplied", async () => {
+        const connection = connectDevice();
+        const started = navigateTo(deviceId, "kitchen");
+        const gotoCommand = decodeCommand(connection);
+        handleAck(createAck(gotoCommand, { accepted: true }, heartSeq));
+        const goal = await started;
+
+        const cancelling = cancelNavigation(deviceId);
+        const cancelCommand = decodeCommand(connection, 1);
+        expect(cancelCommand.payload).toEqual({ goal_id: goal.goal_id });
+        handleAck(createAck(cancelCommand, { accepted: true }, heartSeq));
+
+        await expect(cancelling).resolves.toMatchObject({ goal_id: goal.goal_id });
+    });
+
+    it("keeps an active goal when its device disconnects", async () => {
+        const connection = connectDevice();
+        const started = navigateTo(deviceId, "kitchen");
+        const command = decodeCommand(connection);
+        handleAck(createAck(command, { accepted: true }, heartSeq));
+        const goal = await started;
+
+        // The server no longer calls clearNavigationForDevice on close; a reconnect can deliver the result.
         expect(activeNavigationGoals.has(`${deviceId}:${goal.goal_id}`)).toBe(true);
     });
 });

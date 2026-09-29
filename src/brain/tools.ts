@@ -97,6 +97,10 @@ export const navigateToTool: ToolDefinition = {
         type: "string",
         description: "The named region to drive to, such as kitchen.",
       },
+      device_id: {
+        type: "string",
+        description: "Optional target Heart device ID.",
+      },
     },
     required: ["region"],
   },
@@ -111,20 +115,26 @@ export const navigateToTool: ToolDefinition = {
 
 export const cancelNavigationTool: ToolDefinition = {
   name: "cancel_navigation",
-  description: "Cancel an active navigation goal using its goal ID.",
+  description: "Cancel the active navigation goal, optionally using its goal ID.",
   parameters: {
     type: "object",
     properties: {
       goal_id: {
         type: "string",
-        description: "The goal ID returned by navigate_to.",
+        description: "Optional goal ID returned by navigate_to. Omit to cancel the active goal on the target device.",
+      },
+      device_id: {
+        type: "string",
+        description: "Optional target Heart device ID.",
       },
     },
-    required: ["goal_id"],
+    required: [],
   },
   execute: async (args: Record<string, unknown>) => {
-    const goalId = typeof args.goal_id === "string" ? args.goal_id.trim() : "";
-    if (!goalId) throw new Error("Missing or empty 'goal_id' argument for cancel_navigation tool");
+    const goalId = typeof args.goal_id === "string" ? args.goal_id.trim() : undefined;
+    if (args.goal_id !== undefined && !goalId) {
+      throw new Error("'goal_id' must be a non-empty string when provided");
+    }
 
     const deviceId = getOptionalDeviceId(args.device_id);
     return cancelNavigation(deviceId, goalId);

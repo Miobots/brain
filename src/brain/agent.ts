@@ -10,7 +10,7 @@ export const SYSTEM_PROMPT =
   "You interact with users naturally and speak aloud or perform physical robot actions using your registered tools. " +
   "When the user asks you to say, speak, or greet someone in English or Urdu, invoke the speak tool with the requested text and appropriate language code ('en' or 'ur'). " +
   "When the user asks the robot to go somewhere, invoke navigate_to; it returns a goal ID immediately while progress continues. " +
-  "If the user asks to stop an active drive, invoke cancel_navigation with the goal ID returned by navigate_to. " +
+  "If the user asks to stop an active drive, invoke cancel_navigation; include a goal ID when known, otherwise omit it to cancel the active drive. " +
   "Always execute physical actions via available tools rather than pretending you did.";
 
 export interface AgentRequest {
