@@ -23,6 +23,7 @@ import { resetSequence, checkSequence } from "./sequence-tracker.ts";
 import { runAgentLoop } from "./agent.ts";
 import { devices, deviceSeq } from "./devices.ts";
 import { brainManifest } from "./capabilities.ts";
+import { describeSituation, recordBattery, robotSituations } from "./context.ts";
 import {
     handleNavigationFeedback,
     handleNavigationResult,
@@ -143,6 +144,11 @@ export const httpServer = http.createServer((req, res) => {
                 const response = await runAgentLoop({
                     text: text.trim(),
                     deviceId: targetDeviceId,
+                    situation: describeSituation(robotSituations.get(targetDeviceId), {
+                        // A manifest kept from a robot that has since gone would claim it can still drive.
+                        robot: devices.has(targetDeviceId) ? latestManifests.get(targetDeviceId) : undefined,
+                        brain: brainManifest(deviceRoles.values()),
+                    }),
                     sessionId,
                     userId,
                 });
@@ -428,6 +434,9 @@ wss.on("connection", (ws) => {
             );
             latestManifests.set(deviceId, manifest);
             relayManifestToApps(manifest);
+        }
+        if (envelope.kind === Kind.TELEM && envelope.topic === Topics.STATE_BATTERY) {
+            if (!recordBattery(deviceId, envelope.payload)) console.log("[SERVER] Invalid state.battery payload");
         }
         if (envelope.kind === Kind.EVT && envelope.topic === Topics.NAV_FEEDBACK) {
             handleNavigationFeedback(deviceId, envelope);
