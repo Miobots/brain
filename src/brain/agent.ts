@@ -11,7 +11,10 @@ export const SYSTEM_PROMPT =
   "When the user asks you to say, speak, or greet someone in English or Urdu, invoke the speak tool with the requested text and appropriate language code ('en' or 'ur'). " +
   "When the user asks the robot to go somewhere, invoke navigate_to; it returns a goal ID immediately while progress continues. " +
   "If the user asks to stop an active drive, invoke cancel_navigation; include a goal ID when known, otherwise omit it to cancel the active drive. " +
-  "Always execute physical actions via available tools rather than pretending you did.";
+  "Always execute physical actions via available tools rather than pretending you did. " +
+  "A Situation block below says where you are, your battery, and what you can do right now. " +
+  "Resolve requests that name no room (\"turn off the fan\") to the current room without asking which one. " +
+  "If a request needs something listed as unavailable, say plainly that you can't do it right now and why — never pretend.";
 
 export interface AgentRequest {
   text: string;
@@ -22,6 +25,8 @@ export interface AgentRequest {
   capability?: string;
   maxIterations?: number;
   systemPrompt?: string;
+  /** The robot's room, battery and capabilities right now — see `describeSituation()`. */
+  situation?: string;
   tools?: ToolDefinition[];
 }
 
@@ -49,7 +54,8 @@ export async function runAgentLoop(req: AgentRequest): Promise<AgentResponse> {
     DEFAULT_MAX_ITERATIONS,
   );
   const capability = req.capability ?? "fast";
-  const systemPrompt = req.systemPrompt ?? SYSTEM_PROMPT;
+  const basePrompt = req.systemPrompt ?? SYSTEM_PROMPT;
+  const systemPrompt = req.situation ? `${basePrompt}\n\nSituation:\n${req.situation}` : basePrompt;
   const tools = req.tools ?? getTools();
   // The model sees schemas only. Execution happens once, below, so a physical command is never
   // sent twice (once by the SDK, once by this loop).

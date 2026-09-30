@@ -55,6 +55,11 @@ one-time-purchase price tag.
 
 ---
 
+## Commits
+
+**One-line commit messages only** — no body. **Never add a `Co-Authored-By: Claude` trailer** or a
+"Generated with Claude Code" line, in any commit or PR.
+
 ## Run (with Bun)
 
 ```bash
@@ -106,7 +111,9 @@ Landed: the hub with token handshake, heartbeats and a dead-link watchdog (`serv
 `sendCommand()` with correlation, timeout, idempotency and expiry (`hub.ts`, `command-store.ts`);
 sequence-gap detection; the AI layer (`src/ai/`); the tool registry with `speak` (`tools.ts`); the
 ReAct loop capped at five iterations (`agent.ts`); and the capability manifest — the Heart's half
-relayed to apps, and the Brain's own half published every 10 s (`capabilities.ts`).
+relayed to apps, and the Brain's own half published every 10 s (`capabilities.ts`); and the
+situation block — room, battery and capabilities appended to the system prompt on every
+`/dev/utterance` (`context.ts`). The room is the last region a drive reached; no topic carries it yet.
 
 **Postgres is not wired up**, and should not be until there is something to store. The Brain's half
 of the manifest says so honestly: memory and smart home publish `unavailable`.

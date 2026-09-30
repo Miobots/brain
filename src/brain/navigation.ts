@@ -8,6 +8,7 @@ import {
 } from "@miobots/protocol";
 import { Topics } from "@miobots/protocol";
 import { sendCommand } from "./hub.ts";
+import { recordRoom } from "./context.ts";
 
 export type NavigationStatus = "pending" | "in_progress" | "cancelling";
 
@@ -15,6 +16,7 @@ export type ActiveNavigation = {
     device_id: string;
     goal_id: string;
     corr_id: string;
+    region: string;
     status: NavigationStatus;
     latest_feedback?: NavFeedbackPayload;
 };
@@ -56,6 +58,7 @@ export async function navigateTo(
         device_id,
         goal_id,
         corr_id: "",
+        region,
         status: "pending",
     };
     activeNavigationGoals.set(goalKey(device_id, goal_id), pendingGoal);
@@ -73,6 +76,8 @@ export async function navigateTo(
 
         pendingGoal.corr_id = ack.corr_id;
         pendingGoal.status = "in_progress";
+        // Moving now: the old room is no longer true, and the new one isn't yet.
+        recordRoom(device_id, undefined);
         console.log(`[NAV] Goal started device=${device_id} goal_id=${goal_id}`);
 
         return { goal_id, status: "in_progress", target_device: device_id, ack: ackPayload };
@@ -161,6 +166,7 @@ export function handleNavigationResult(
     }
 
     activeNavigationGoals.delete(goalKey(device_id, goal.goal_id));
+    if (payload.success) recordRoom(device_id, goal.region);
     console.log(`[NAV] Result device=${device_id} goal_id=${goal.goal_id} success=${payload.success}`);
     return true;
 }
