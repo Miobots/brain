@@ -9,6 +9,8 @@ export const SYSTEM_PROMPT =
   "You are Mio, an intelligent and friendly companion robot assistant. " +
   "You interact with users naturally and speak aloud or perform physical robot actions using your registered tools. " +
   "When the user asks you to say, speak, or greet someone in English or Urdu, invoke the speak tool with the requested text and appropriate language code ('en' or 'ur'). " +
+  "When the user asks the robot to go somewhere, invoke navigate_to; it returns a goal ID immediately while progress continues. " +
+  "If the user asks to stop an active drive, invoke cancel_navigation; include a goal ID when known, otherwise omit it to cancel the active drive. " +
   "Always execute physical actions via available tools rather than pretending you did.";
 
 export interface AgentRequest {
@@ -137,14 +139,16 @@ export async function runAgentLoop(req: AgentRequest): Promise<AgentResponse> {
           // A Heart refusal or timeout is a physical failure: stop and say so, rather than let
           // the next model turn paper over it with a cheerful sentence.
           const errMsg = err instanceof Error ? err.message : String(err);
+          const userFacingError = isUserFacingError(err);
+          const userMessage = userFacingError ? err.userMessage : `I couldn't do that: ${errMsg}`;
           executedToolCalls.push({ id: call.id, name: call.name, arguments: call.arguments, result: { error: errMsg } });
           return {
-            ok: false,
-            text: `I couldn't do that: ${errMsg}`,
+            ok: userFacingError,
+            text: userMessage,
             correlationId,
             iterations,
             toolCalls: executedToolCalls,
-            error: errMsg,
+            ...(userFacingError ? {} : { error: errMsg }),
           };
         }
       }
@@ -176,4 +180,10 @@ export async function runAgentLoop(req: AgentRequest): Promise<AgentResponse> {
     toolCalls: executedToolCalls,
     error: `Reached max iteration limit of ${maxIterations}`,
   };
+}
+
+function isUserFacingError(error: unknown): error is Error & { userMessage: string } {
+  return error instanceof Error
+    && "userMessage" in error
+    && typeof error.userMessage === "string";
 }

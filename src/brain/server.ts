@@ -23,6 +23,10 @@ import { resetSequence, checkSequence } from "./sequence-tracker.ts";
 import { runAgentLoop } from "./agent.ts";
 import { devices, deviceSeq } from "./devices.ts";
 import { brainManifest } from "./capabilities.ts";
+import {
+    handleNavigationFeedback,
+    handleNavigationResult,
+} from "./navigation.ts";
 
 export { devices, deviceSeq };
 
@@ -424,6 +428,12 @@ wss.on("connection", (ws) => {
             );
             latestManifests.set(deviceId, manifest);
             relayManifestToApps(manifest);
+        }
+        if (envelope.kind === Kind.EVT && envelope.topic === Topics.NAV_FEEDBACK) {
+            handleNavigationFeedback(deviceId, envelope);
+        }
+        if (envelope.kind === Kind.EVT && envelope.topic === Topics.NAV_RESULT) {
+            handleNavigationResult(deviceId, envelope);
         }
     });
 
