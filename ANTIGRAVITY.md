@@ -16,6 +16,13 @@
 
 ---
 
+## Commits
+
+**One-line commit messages only** — no body. **Never add a `Co-Authored-By: Claude` trailer** or a
+"Generated with Claude Code" line, in any commit or PR.
+
+---
+
 ## Toolchain & Commands (Bun)
 
 ```bash
