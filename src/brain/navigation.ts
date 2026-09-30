@@ -101,7 +101,12 @@ export async function cancelNavigation(
         const ack = await sendCommand(goal.device_id, Topics.NAV_CANCEL, { goal_id: goal.goal_id });
         const ackPayload = asAckPayload(ack.payload);
         if (ackPayload?.accepted !== true) {
-            goal.status = "in_progress";
+            // Heart owns the past: if it has no such goal, neither do we (e.g. dropped on disconnect).
+            if (ackPayload?.reason === "goal_not_found") {
+                activeNavigationGoals.delete(goalKey(goal.device_id, goal.goal_id));
+            } else {
+                goal.status = "in_progress";
+            }
             throw new Error(`Heart refused nav.cancel: ${ackPayload?.reason ?? "unknown_reason"}`);
         }
 

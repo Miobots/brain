@@ -185,4 +185,20 @@ describe("Brain navigation lifecycle", () => {
         // The server no longer calls clearNavigationForDevice on close; a reconnect can deliver the result.
         expect(activeNavigationGoals.has(`${deviceId}:${goal.goal_id}`)).toBe(true);
     });
+
+    it("drops a goal the Heart no longer knows so navigation is not locked out", async () => {
+        const connection = connectDevice();
+        const started = navigateTo(deviceId, "kitchen");
+        handleAck(createAck(decodeCommand(connection), { accepted: true }, heartSeq));
+        const goal = await started;
+
+        const cancelling = cancelNavigation(deviceId);
+        handleAck(createAck(decodeCommand(connection, 1), {
+            accepted: false,
+            reason: "goal_not_found",
+        }, heartSeq));
+
+        await expect(cancelling).rejects.toThrow(/goal_not_found/);
+        expect(activeNavigationGoals.has(`${deviceId}:${goal.goal_id}`)).toBe(false);
+    });
 });
