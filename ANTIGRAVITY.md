@@ -30,6 +30,7 @@ bun install        # Install dependencies (links @miobots/protocol) — re-run a
 bun test           # Run tests
 bun run typecheck  # Typecheck
 bun run src/index.ts # Start Brain hub
+bun run chat         # Type to the agent; each line goes to /dev/utterance
 cp .env.example .env # /dev/utterance needs AI_PROVIDER_GROQ_API_KEY (the `fast` capability)
 ```
 

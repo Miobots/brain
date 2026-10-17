@@ -66,6 +66,7 @@ one-time-purchase price tag.
 bun install      # ALSO re-run this after any change to miobots-protocol — see below
 cp .env.example .env   # /dev/utterance needs AI_PROVIDER_GROQ_API_KEY (the `fast` capability)
 bun start        # Bun runs TypeScript directly — no build step
+bun run chat     # type to the agent; each line goes to /dev/utterance
 bun test
 bun run typecheck
 ```
