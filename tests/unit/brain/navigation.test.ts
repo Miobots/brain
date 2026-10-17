@@ -17,6 +17,7 @@ import {
     NavigationRefusalError,
 } from "../../../src/brain/navigation.ts";
 import { handleAck } from "../../../src/brain/hub.ts";
+import { cancelNavigationTool } from "../../../src/brain/tools.ts";
 import { devices, deviceSeq } from "../../../src/brain/devices.ts";
 import { deviceCommands } from "../../../src/brain/command-store.ts";
 
@@ -173,6 +174,26 @@ describe("Brain navigation lifecycle", () => {
         handleAck(createAck(cancelCommand, { accepted: true }, heartSeq));
 
         await expect(cancelling).resolves.toMatchObject({ goal_id: goal.goal_id });
+    });
+
+    it("cancel_navigation with goal_id: null stops the active drive", async () => {
+        // A fresh conversation has no goal ID, so "stop" arrives as { goal_id: null } (B2.5).
+        expect(cancelNavigationTool.parameters).toMatchObject({
+            properties: { goal_id: { type: ["string", "null"] } },
+        });
+
+        const connection = connectDevice();
+        const started = navigateTo(deviceId, "kitchen");
+        handleAck(createAck(decodeCommand(connection), { accepted: true }, heartSeq));
+        const goal = await started;
+
+        const cancelling = cancelNavigationTool.execute!({ goal_id: null, device_id: null });
+        const cancelCommand = decodeCommand(connection, 1);
+        expect(cancelCommand.topic).toBe("nav.cancel");
+        expect(cancelCommand.payload).toEqual({ goal_id: goal.goal_id });
+        handleAck(createAck(cancelCommand, { accepted: true }, heartSeq));
+
+        await expect(cancelling).resolves.toMatchObject({ goal_id: goal.goal_id, status: "cancelling" });
     });
 
     it("keeps an active goal when its device disconnects", async () => {

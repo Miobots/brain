@@ -119,12 +119,15 @@ export const cancelNavigationTool: ToolDefinition = {
   parameters: {
     type: "object",
     properties: {
+      // `null` is allowed: each utterance is a fresh conversation, so "stop" arrives without the
+      // goal ID and models fill the slot with null. Groq rejects that against a string-only schema
+      // before the tool runs, and the robot keeps driving.
       goal_id: {
-        type: "string",
-        description: "Optional goal ID returned by navigate_to. Omit to cancel the active goal on the target device.",
+        type: ["string", "null"],
+        description: "Optional goal ID returned by navigate_to. Omit or null to cancel the active goal on the target device.",
       },
       device_id: {
-        type: "string",
+        type: ["string", "null"],
         description: "Optional target Heart device ID.",
       },
     },
@@ -132,7 +135,7 @@ export const cancelNavigationTool: ToolDefinition = {
   },
   execute: async (args: Record<string, unknown>) => {
     const goalId = typeof args.goal_id === "string" ? args.goal_id.trim() : undefined;
-    if (args.goal_id !== undefined && !goalId) {
+    if (args.goal_id != null && !goalId) {
       throw new Error("'goal_id' must be a non-empty string when provided");
     }
 
