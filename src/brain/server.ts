@@ -31,6 +31,8 @@ import {
     handleNavigationFeedback,
     handleNavigationResult,
 } from "./navigation.ts";
+import { MCPToolRegistry } from "../agents/mcp-agent/tool-registry.ts";
+import { MCPToolExecutor } from "../agents/mcp-agent/tool-executor.ts";
 
 export { devices, deviceSeq };
 
@@ -256,6 +258,64 @@ export const httpServer = http.createServer((req, res) => {
     res.end(JSON.stringify({ error: "Not found" }));
 });
 
+let mcpSmokeTestStarted = false;
+
+async function runMcpSmokeTest(deviceId: string): Promise<void> {
+    if (process.env.MCP_SMOKE_TEST !== "1" || mcpSmokeTestStarted) {
+        return;
+    }
+
+    mcpSmokeTestStarted = true;
+
+    const discoveredTools = mcpConnectionManager.getAvailableTools(deviceId);
+
+    console.log("\n[MCP SMOKE TEST] Discovered tools:");
+    for (const tool of discoveredTools) {
+        console.log(`  - ${tool.name} (${tool.qualifiedName})`);
+    }
+
+    const statusTool = discoveredTools.find(
+        (tool) => tool.name === "system.get_status",
+    );
+
+    if (!statusTool) {
+        console.error("[MCP SMOKE TEST] system.get_status was not discovered.");
+        return;
+    }
+
+    const registry = new MCPToolRegistry(mcpConnectionManager);
+
+    try {
+        const executor = new MCPToolExecutor(
+            registry,
+            mcpConnectionManager,
+            {
+                permissionProvider: {
+                    authorize: async ({ tool }) => ({
+                        allowed: tool.permission === "read",
+                    }),
+                },
+            },
+        );
+
+        console.log(`\n[MCP SMOKE TEST] Calling ${statusTool.qualifiedName}...`);
+
+        const result = await executor.execute(statusTool.qualifiedName, {});
+
+        console.log("\n[MCP SMOKE TEST] Execution result:");
+        console.dir(result, { depth: null });
+
+        if (result.ok) {
+            console.log("\n[MCP SMOKE TEST] SUCCESS");
+        } else {
+            console.error("\n[MCP SMOKE TEST] FAILED:", result.error);
+        }
+    } catch (error) {
+        console.error("[MCP SMOKE TEST] Error:", error);
+    } finally {
+        registry.destroy();
+    }
+}
 export const wss = new WebSocketServer({
     server: httpServer,
     path: "/ws",
@@ -420,13 +480,36 @@ wss.on("connection", (ws) => {
             ws.send(encode(welcome));
             console.log(`[SERVER] welcome Ack Sent`);
             startHeartbeat();
+if (hello.role === DeviceRole.GANGLION) {
+    if (!deviceId) {
+        console.error("[SERVER] Cannot attach MCP: missing device ID");
+        return;
+    }
 
-            if (hello.role === DeviceRole.GANGLION) {
-                const peer: MCPAuthenticatedPeer = { deviceId, socket: ws, generation };
-                void mcpConnectionManager.attach(peer).catch((error: unknown) => {
-                    console.log(`[SERVER] MCP attach failed device=${deviceId} reason=${error instanceof Error ? error.message : "unknown"}`);
-                });
-            }
+    // Capture the validated ID for asynchronous callbacks.
+    const authenticatedDeviceId: string = deviceId;
+
+    const peer: MCPAuthenticatedPeer = {
+        deviceId: authenticatedDeviceId,
+        socket: ws,
+        generation,
+    };
+
+    void mcpConnectionManager.attach(peer)
+        .then(async () => {
+            console.log(`[SERVER] MCP ready device=${authenticatedDeviceId}`);
+            await runMcpSmokeTest(authenticatedDeviceId);
+        })
+        .catch((error: unknown) => {
+            console.log(
+                `[SERVER] MCP attach failed device=${authenticatedDeviceId} reason=${
+                    error instanceof Error ? error.message : "unknown"
+                }`,
+            );
+        });
+}
+
+// Keep the SYNAPSE manifest replay logic here, outside the GANGLION block.
 
             // An app that has just connected should not stare at a blank screen until the next
             // publish tick, so replay what we already know.

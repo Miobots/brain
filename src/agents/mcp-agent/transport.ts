@@ -281,15 +281,21 @@ export class MCPSessionImpl implements MCPSession {
       const entries = Array.isArray(result.tools) ? result.tools : [];
       for (const entry of entries) {
         if (!this.isTool(entry)) throw new Error("Malformed MCP tool definition");
-        tools.push({
-          name: entry.name,
-          qualifiedName: `mcp__${this.peer.deviceId}__${entry.name.replaceAll(".", "__")}`,
-          originalName: entry.name,
-          serverId: this.peer.deviceId,
-          description: entry.description ?? "",
-          inputSchema: entry.inputSchema,
-          permission: "action",
-        });
+        const metadata = entry._meta as Record<string, unknown> | undefined;
+const permission = metadata?.["miobots/permission"];
+
+tools.push({
+  name: entry.name,
+  qualifiedName: `mcp__${this.peer.deviceId}__${entry.name.replaceAll(".", "__")}`,
+  originalName: entry.name,
+  serverId: this.peer.deviceId,
+  description: entry.description ?? "",
+  inputSchema: entry.inputSchema,
+  permission:
+    permission === "read" || permission === "action"
+      ? permission
+      : "action",
+});
       }
       cursor = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : undefined;
       if (!cursor) break;
@@ -369,13 +375,28 @@ export class MCPSessionImpl implements MCPSession {
     return response.result as Record<string, unknown>;
   }
 
-  private isTool(value: unknown): value is { name: string; description?: string; inputSchema: Record<string, unknown> } {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-    const item = value as Record<string, unknown>;
-    return typeof item.name === "string" && item.name.length > 0 && item.name.length <= 256 &&
-      (item.description === undefined || typeof item.description === "string") &&
-      typeof item.inputSchema === "object" && item.inputSchema !== null && !Array.isArray(item.inputSchema);
-  }
+ private isTool(value: unknown): value is {
+  name: string;
+  description?: string;
+  inputSchema: Record<string, unknown>;
+  _meta?: Record<string, unknown>;
+} {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+
+  const item = value as Record<string, unknown>;
+
+  return typeof item.name === "string" &&
+    item.name.length > 0 &&
+    item.name.length <= 256 &&
+    (item.description === undefined || typeof item.description === "string") &&
+    typeof item.inputSchema === "object" &&
+    item.inputSchema !== null &&
+    !Array.isArray(item.inputSchema) &&
+    (item._meta === undefined ||
+      (typeof item._meta === "object" &&
+        item._meta !== null &&
+        !Array.isArray(item._meta)));
+}
 
   private isResource(value: unknown): value is { uri: string; name?: string; description?: string; mimeType?: string } {
     if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
