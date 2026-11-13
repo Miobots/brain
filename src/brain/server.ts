@@ -21,7 +21,7 @@ import { createHeartbeat, handleAck, handleHeartBeat, sendCommand } from "./hub.
 import { deviceCommands } from "./command-store.ts";
 import { resetSequence, checkSequence } from "./sequence-tracker.ts";
 import { runAgentLoop } from "./agent.ts";
-import { devices, deviceSeq } from "./devices.ts";
+import { devices, deviceRoles, deviceSeq, resolveHeartDeviceId } from "./devices.ts";
 import { brainManifest } from "./capabilities.ts";
 import { describeSituation, recordBattery, robotSituations } from "./context.ts";
 import {
@@ -38,7 +38,7 @@ export { devices, deviceSeq };
  * slot a connection occupies without inferring it from the device id." The hub read `role` off
  * sys.hello and threw it away, so it had no way to tell a robot from an app.
  */
-export const deviceRoles = new Map<string, DeviceRole>();
+export { deviceRoles } from "./devices.ts";
 
 /**
  * Last capability manifest seen from each device.
@@ -135,12 +135,11 @@ export const httpServer = http.createServer((req, res) => {
                 }
             }
 
-            const targetDeviceId =
-                (device_id as string | undefined) ?? (devices.keys().next().value || "heart-sim-01");
             const sessionId = session_id as string | undefined;
             const userId = user_id as string | undefined;
 
             try {
+                const targetDeviceId = resolveHeartDeviceId(device_id as string | undefined);
                 const response = await runAgentLoop({
                     text: text.trim(),
                     deviceId: targetDeviceId,
@@ -158,7 +157,8 @@ export const httpServer = http.createServer((req, res) => {
                 res.end(JSON.stringify(response));
             } catch (err: unknown) {
                 const errorMessage = err instanceof Error ? err.message : String(err);
-                res.writeHead(500);
+                const unavailable = errorMessage.includes("Heart device");
+                res.writeHead(unavailable ? 503 : 500);
                 res.end(
                     JSON.stringify({
                         status: "error",
@@ -188,27 +188,27 @@ export const httpServer = http.createServer((req, res) => {
         req.on("end", async () => {
             try {
                 const parsed = JSON.parse(body || "{}");
+                if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+                    res.writeHead(400);
+                    res.end(JSON.stringify({ error: "Body must be a JSON object", status: "error" }));
+                    return;
+                }
                 const text = parsed.text;
                 const lang = parsed.lang ?? Language.EN;
                 const priority = parsed.priority ?? "normal";
-                const targetDeviceId = parsed.device_id ?? (devices.keys().next().value || "heart-sim-01");
-
                 if (typeof text !== "string" || text.trim().length === 0) {
                     res.writeHead(400);
                     res.end(JSON.stringify({ error: "Missing or invalid 'text' field", status: "error" }));
                     return;
                 }
-
-                if (!devices.has(targetDeviceId)) {
-                    res.writeHead(503);
-                    res.end(
-                        JSON.stringify({
-                            error: `Device '${targetDeviceId}' is not connected`,
-                            status: "error",
-                        })
-                    );
+                if (parsed.device_id !== undefined && typeof parsed.device_id !== "string") {
+                    res.writeHead(400);
+                    res.end(JSON.stringify({ error: "'device_id' must be a string", status: "error" }));
                     return;
                 }
+                const targetDeviceId = resolveHeartDeviceId(
+                    typeof parsed.device_id === "string" ? parsed.device_id : undefined,
+                );
 
                 const ack = await sendCommand(targetDeviceId, Topics.VOICE_SPEAK, {
                     text,
@@ -226,7 +226,7 @@ export const httpServer = http.createServer((req, res) => {
             } catch (err: unknown) {
                 const errorMessage = err instanceof Error ? err.message : String(err);
                 const isTimeout = errorMessage.includes("timed out");
-                res.writeHead(isTimeout ? 504 : 500);
+                res.writeHead(isTimeout ? 504 : errorMessage.includes("Heart device") ? 503 : 500);
                 res.end(
                     JSON.stringify({
                         status: "error",

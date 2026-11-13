@@ -6,17 +6,15 @@ import {
   type AckPayload,
 } from "@miobots/protocol";
 import { sendCommand } from "./hub.ts";
-import { devices } from "./devices.ts";
+import { resolveHeartDeviceId } from "./devices.ts";
 import { cancelNavigation, navigateTo } from "./navigation.ts";
 import type { ToolDefinition } from "../ai/types.ts";
 
 /**
- * Returns the default device_id to target for hardware tool commands.
- * Defaults to the first connected device in the hub, or 'heart-sim-01'.
+ * Returns the deterministic authenticated Heart target for hardware tool commands.
  */
 export function getDefaultDeviceId(): string {
-  const firstConnected = devices.keys().next().value;
-  return firstConnected ?? "heart-sim-01";
+  return resolveHeartDeviceId();
 }
 
 export interface SpeakToolArgs {
@@ -59,10 +57,9 @@ export const speakTool: ToolDefinition = {
     const priority: Priority =
       args.priority === "urgent" ? Priority.URGENT : Priority.NORMAL;
 
-    const targetDeviceId =
-      typeof args.device_id === "string" && args.device_id.trim().length > 0
-        ? args.device_id.trim()
-        : getDefaultDeviceId();
+    const targetDeviceId = resolveHeartDeviceId(
+      typeof args.device_id === "string" && args.device_id.trim().length > 0 ? args.device_id : undefined,
+    );
 
     const payload: SpeakPayload = {
       text,
@@ -151,13 +148,13 @@ export const toolRegistry: Record<string, ToolDefinition> = {
 };
 
 function getTargetDeviceId(value: unknown): string {
-  return typeof value === "string" && value.trim().length > 0
-    ? value.trim()
-    : getDefaultDeviceId();
+  return resolveHeartDeviceId(typeof value === "string" && value.trim().length > 0 ? value : undefined);
 }
 
 function getOptionalDeviceId(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+  return value === undefined || value === null
+    ? undefined
+    : resolveHeartDeviceId(typeof value === "string" ? value : "");
 }
 
 export function getTools(): ToolDefinition[] {
