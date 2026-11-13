@@ -84,6 +84,8 @@ describe("Brain MCP transport and session", () => {
     afterEach(async () => closeAll());
 
     it("initializes an allowlisted Ganglion session and handles tools/list", async () => {
+        const states: string[] = [];
+        const unsubscribe = mcpConnectionManager.onStateChange((_serverId, status) => states.push(status));
         const { client, seq } = await connectGanglion();
         client.on("message", (raw) => {
             const envelope = rawEnvelope(raw);
@@ -96,6 +98,10 @@ describe("Brain MCP transport and session", () => {
                     capabilities: {},
                     serverInfo: { name: "test-ganglion", version: "1.0" },
                 });
+            } else if (envelope.topic === Topics.MCP_REQUEST && payload.method === "tools/list") {
+                sendMcpResponse(client, seq, envelope.corr_id, String(payload.id), {
+                    tools: [{ name: "capture_screen", description: "Capture", inputSchema: { type: "object" } }],
+                });
             } else if (envelope.topic === Topics.MCP_NOTIFICATION) {
                 expect(payload.method).toBe("notifications/initialized");
             }
@@ -103,24 +109,14 @@ describe("Brain MCP transport and session", () => {
 
         await waitForSession("ganglion-test");
         const session = mcpConnectionManager.getSession("ganglion-test")!;
-        const listPromise = session.listTools();
-        const request = await new Promise<{ correlationId: string; id: string }>((resolve) => {
-            const listener = (raw: WebSocket.RawData) => {
-                const envelope = rawEnvelope(raw);
-                if (envelope.topic !== Topics.MCP_REQUEST) return;
-                const payload = envelope.payload as { method: string; id: string };
-                if (payload.method !== "tools/list") return;
-                client.off("message", listener);
-                client.send(encode(createAck(envelope, { accepted: true }, seq)));
-                resolve({ correlationId: envelope.corr_id, id: payload.id });
-            };
-            client.on("message", listener);
-        });
-        sendMcpResponse(client, seq, request.correlationId, request.id, {
-            tools: [{ name: "capture_screen", description: "Capture", inputSchema: { type: "object" } }],
-        });
-        const tools = await listPromise;
+        const tools = await session.listTools();
         expect(tools[0]).toMatchObject({ qualifiedName: "mcp__ganglion-test__capture_screen", permission: "action" });
+        expect(mcpConnectionManager.getStatus("ganglion-test")).toBe("ready");
+        expect(mcpConnectionManager.getReadyServers()[0]).toMatchObject({ id: "ganglion-test", name: "test-ganglion" });
+        expect(mcpConnectionManager.getAvailableTools("ganglion-test")).toEqual(tools);
+        expect(mcpConnectionManager.getTool(tools[0]!.qualifiedName)).toEqual(tools[0]);
+        expect(states).toEqual(expect.arrayContaining(["connecting", "initializing", "ready"]));
+        unsubscribe();
     });
 
     it("fails closed for a non-allowlisted Ganglion", async () => {
@@ -141,6 +137,9 @@ describe("Brain MCP transport and session", () => {
                 sendMcpResponse(client, seq, envelope.corr_id, String(payload.id), {
                     protocolVersion: "2025-06-18", capabilities: {}, serverInfo: { name: "test" },
                 });
+            }
+            if (payload.method === "tools/list") {
+                sendMcpResponse(client, seq, envelope.corr_id, String(payload.id), { tools: [] });
             }
         });
         client.on("message", (raw) => {
@@ -176,6 +175,8 @@ describe("Brain MCP transport and session", () => {
             if (payload.method === "initialize") sendMcpResponse(client, seq, envelope.corr_id, String(payload.id), {
                 protocolVersion: "2025-06-18", capabilities: {}, serverInfo: { name: "test" },
             });
+            if (payload.method === "tools/list") sendMcpResponse(client, seq, envelope.corr_id, String(payload.id), { tools: [] });
+            if (payload.method === "tools/list") sendMcpResponse(client, seq, envelope.corr_id, String(payload.id), { tools: [] });
             if (payload.method === "notifications/initialized") return;
             if (payload.method === "resources/list") sendMcpResponse(client, seq, envelope.corr_id, "wrong-id", {
                 resources: [],
@@ -197,6 +198,7 @@ describe("Brain MCP transport and session", () => {
             if (payload.method === "initialize") sendMcpResponse(client, seq, envelope.corr_id, String(payload.id), {
                 protocolVersion: "2025-06-18", capabilities: {}, serverInfo: { name: "test" },
             });
+            if (payload.method === "tools/list") sendMcpResponse(client, seq, envelope.corr_id, String(payload.id), { tools: [] });
         });
         await waitForSession("ganglion-test");
         const session = mcpConnectionManager.getSession("ganglion-test")!;

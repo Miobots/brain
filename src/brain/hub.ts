@@ -32,6 +32,7 @@ export interface CommandHandle {
     ack: Promise<Envelope<string, unknown>>;
     deviceId: string;
     socket: WebSocket;
+    cancel: (reason?: string) => void;
 }
 
 export interface CommandOptions {
@@ -232,6 +233,7 @@ export function sendCommandHandle<T extends string = string, P = unknown>(
                 ack: existing,
                 deviceId: device_id,
                 socket: connection,
+                cancel: () => undefined,
             };
         }
     }
@@ -313,11 +315,34 @@ export function sendCommandHandle<T extends string = string, P = unknown>(
 
     connection.send(encode(env));
 
-    return { correlationId: corr_id, ack: ackPromise, deviceId: device_id, socket: connection };
+    return {
+        correlationId: corr_id,
+        ack: ackPromise,
+        deviceId: device_id,
+        socket: connection,
+        cancel: (reason = "Command cancelled") => cancelPendingCommand(corr_id, reason),
+    };
 }
 
 function rejectedCommandHandle(error: Error, deviceId: string): CommandHandle {
-    return { correlationId: "", ack: Promise.reject(error), deviceId, socket: undefined as never };
+    return {
+        correlationId: "",
+        ack: Promise.reject(error),
+        deviceId,
+        socket: undefined as never,
+        cancel: () => undefined,
+    };
+}
+
+function cancelPendingCommand(correlationId: string, reason: string): void {
+    const pending = pendingCommands.get(correlationId);
+    if (!pending) return;
+    clearTimeout(pending.timeout);
+    pendingCommands.delete(correlationId);
+    const map = deviceCommands.get(pending.device_id);
+    const command = map?.get(pending.idem_key);
+    if (command) command.status = "timeout";
+    pending.reject(new Error(reason));
 }
 
 function isRejectedAck(ack: Envelope<string, unknown>): ack is Envelope<string, { accepted: false; reason?: string }> {

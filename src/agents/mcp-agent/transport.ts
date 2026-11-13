@@ -111,7 +111,7 @@ export class MCPTransport {
       },
     );
     try {
-      await this.awaitAck(handle, method);
+      await this.awaitAck(handle, method, options?.signal, rpcId);
     } catch (error) {
       if (responsePromise) void responsePromise.catch(() => undefined);
       throw error;
@@ -166,9 +166,9 @@ export class MCPTransport {
     }
   }
 
-  private async awaitAck(handle: CommandHandle, method: string): Promise<void> {
+  private async awaitAck(handle: CommandHandle, method: string, signal?: AbortSignal, rpcId?: string): Promise<void> {
     if (!handle.correlationId) await handle.ack;
-    await handle.ack.catch((error: unknown) => {
+    const ack = handle.ack.catch((error: unknown) => {
       const pending = this.pending.get(handle.correlationId);
       if (pending) {
         clearTimeout(pending.timer);
@@ -176,6 +176,30 @@ export class MCPTransport {
         pending.reject(error instanceof Error ? error : new Error("MCP protocol ACK rejected"));
       }
       throw new Error(`MCP protocol ACK failed for ${method}: ${error instanceof Error ? error.message : "rejected"}`);
+    });
+    if (!signal) {
+      await ack;
+      return;
+    }
+    if (signal.aborted) {
+      handle.cancel("MCP request cancelled before protocol ACK");
+      if (rpcId) void this.sendNotification("notifications/cancelled", { requestId: rpcId }).catch(() => undefined);
+      throw new Error("MCP request cancelled");
+    }
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        handle.cancel("MCP request cancelled before protocol ACK");
+        if (rpcId) void this.sendNotification("notifications/cancelled", { requestId: rpcId }).catch(() => undefined);
+        reject(new Error("MCP request cancelled"));
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      ack.then(() => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      }, (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      });
     });
   }
 
@@ -259,7 +283,8 @@ export class MCPSessionImpl implements MCPSession {
         if (!this.isTool(entry)) throw new Error("Malformed MCP tool definition");
         tools.push({
           name: entry.name,
-          qualifiedName: `mcp__${this.peer.deviceId}__${entry.name}`,
+          qualifiedName: `mcp__${this.peer.deviceId}__${entry.name.replaceAll(".", "__")}`,
+          originalName: entry.name,
           serverId: this.peer.deviceId,
           description: entry.description ?? "",
           inputSchema: entry.inputSchema,
@@ -295,8 +320,8 @@ export class MCPSessionImpl implements MCPSession {
 
   async callTool(call: MCPToolCall, options?: MCPCallOptions): Promise<MCPToolExecutionResult> {
     if (call.serverId !== this.peer.deviceId) return { ok: false, output: [], isError: true, error: { code: "server_mismatch", message: "Tool belongs to another MCP server" } };
-    const prefix = `mcp__${this.peer.deviceId}__`;
-    const toolName = call.toolName.startsWith(prefix) ? call.toolName.slice(prefix.length) : call.toolName;
+    const knownTool = this.toolCache?.find((tool) => tool.qualifiedName === call.toolName || tool.name === call.toolName);
+    const toolName = knownTool?.originalName ?? call.toolName;
     if (!toolName || toolName.includes("__")) return { ok: false, output: [], isError: true, error: { code: "invalid_tool_name", message: "Tool name is not valid for this MCP server" } };
     const response = await this.transport.request("tools/call", { name: toolName, arguments: call.arguments }, options);
     if (!("result" in response)) return { ok: false, output: [], isError: true, error: { code: "mcp_error", message: response.error.message } };

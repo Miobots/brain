@@ -15,6 +15,7 @@ import type {
   MCPCallOptions,
   MCPNotification,
 } from "./types.ts";
+import type { JsonRpcResponse } from "@miobots/protocol";
 
 export interface MCPAgent {
   run(request: MCPAgentRequest, options?: MCPAgentRunOptions): Promise<MCPAgentResult>;
@@ -32,6 +33,11 @@ export interface MCPConnectionManager {
   getStatus(serverId: string): MCPConnectionStatus;
   getReadyServers(): MCPServerInfo[];
   getSession(serverId: string): MCPSession | undefined;
+  request(serverId: string, method: string, params?: Record<string, unknown> | unknown[], options?: MCPCallOptions): Promise<JsonRpcResponse>;
+  getAvailableTools(serverId?: string): MCPToolDefinition[];
+  getTool(qualifiedName: string): MCPToolDefinition | undefined;
+  refresh(serverId?: string): Promise<MCPToolDefinition[]>;
+  onStateChange(listener: (serverId: string, status: MCPConnectionStatus) => void): () => void;
 }
 
 export interface MCPSession {

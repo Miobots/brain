@@ -52,7 +52,11 @@ export interface MCPServerInfo {
 export type MCPConnectionStatus =
   | "disconnected"
   | "connecting"
+  | "initializing"
   | "ready"
+  | "reconnecting"
+  | "closing"
+  | "connected"
   | "degraded"
   | "failed";
 
@@ -60,6 +64,7 @@ export type MCPToolPermission = "read" | "action";
 
 export interface MCPToolDefinition {
   name: string;
+  originalName?: string;
   qualifiedName: string;
   serverId: string;
   description: string;

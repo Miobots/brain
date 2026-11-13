@@ -82,6 +82,11 @@ describe("MCP Agent contracts", () => {
             getStatus() { return "disconnected"; },
             getReadyServers() { return []; },
             getSession() { return undefined; },
+            async request() { throw new Error("not implemented in contract fixture"); },
+            getAvailableTools() { return []; },
+            getTool() { return undefined; },
+            async refresh() { return []; },
+            onStateChange() { return () => undefined; },
         };
 
         expect(manager.getStatus("ganglion")).toBe("disconnected");
