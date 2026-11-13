@@ -3,6 +3,7 @@ import type {
   ChatMessage,
   JsonSchema,
 } from "../../ai/types.ts";
+import type { WebSocket } from "ws";
 
 export type MCPTaskStatus =
   | "queued"
@@ -42,6 +43,7 @@ export type OutputBlock =
 export interface MCPServerInfo {
   id: string;
   name: string;
+  protocolVersion?: string;
   version?: string;
   capabilities?: readonly string[];
   metadata?: Record<string, unknown>;
@@ -72,6 +74,23 @@ export interface MCPToolCall {
   serverId: string;
   arguments: Record<string, unknown>;
 }
+
+export interface MCPCallOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+export interface MCPAuthenticatedPeer {
+  deviceId: string;
+  socket: WebSocket;
+  generation: number;
+}
+
+export type MCPNotification =
+  | { method: "notifications/tools/list_changed" }
+  | { method: "notifications/resources/list_changed" }
+  | { method: "notifications/progress"; params?: Record<string, unknown> }
+  | { method: string; params?: Record<string, unknown> };
 
 export interface MCPToolExecutionResult {
   ok: boolean;
@@ -172,4 +191,11 @@ export interface MCPResourceDefinition {
   mediaType?: string;
   serverId: string;
   metadata?: Record<string, unknown>;
+}
+
+export interface MCPResourceListEntry {
+  uri: string;
+  name?: string;
+  description?: string;
+  mimeType?: string;
 }

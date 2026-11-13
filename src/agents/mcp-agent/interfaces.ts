@@ -3,6 +3,7 @@ import type {
   MCPAgentResult,
   MCPAgentRunOptions,
   MCPConnectionStatus,
+  MCPAuthenticatedPeer,
   MCPServerInfo,
   MCPTaskSnapshot,
   MCPToolCall,
@@ -11,6 +12,8 @@ import type {
   MCPModelRequest,
   MCPModelResponse,
   MCPResourceDefinition,
+  MCPCallOptions,
+  MCPNotification,
 } from "./types.ts";
 
 export interface MCPAgent {
@@ -24,8 +27,8 @@ export interface MCPAgentLoop {
 }
 
 export interface MCPConnectionManager {
-  connect(server: MCPServerInfo): Promise<MCPSession>;
-  disconnect(serverId: string): Promise<void>;
+  attach(peer: MCPAuthenticatedPeer): Promise<MCPSession>;
+  detach(peer: MCPAuthenticatedPeer): Promise<void>;
   getStatus(serverId: string): MCPConnectionStatus;
   getReadyServers(): MCPServerInfo[];
   getSession(serverId: string): MCPSession | undefined;
@@ -34,7 +37,8 @@ export interface MCPConnectionManager {
 export interface MCPSession {
   listTools(): Promise<MCPToolDefinition[]>;
   listResources(): Promise<MCPResourceDefinition[]>;
-  callTool(call: MCPToolCall): Promise<MCPToolExecutionResult>;
+  callTool(call: MCPToolCall, options?: MCPCallOptions): Promise<MCPToolExecutionResult>;
+  addNotificationListener(listener: (notification: MCPNotification) => void): () => void;
 }
 
 export interface MCPToolRegistry {

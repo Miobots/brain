@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type {
     MCPAgent,
+    MCPConnectionManager,
     MCPModelGateway,
     MCPToolDefinition,
     OutputBlock,
@@ -72,5 +73,18 @@ describe("MCP Agent contracts", () => {
         expect(tool.qualifiedName).toBe("mcp__ganglion__capture_screen");
         expect(gateway).toBeDefined();
         expect(agent).toBeDefined();
+    });
+
+    it("uses attach and detach for authenticated peers rather than outbound connects", () => {
+        const manager: MCPConnectionManager = {
+            async attach() { throw new Error("not implemented in contract fixture"); },
+            async detach() {},
+            getStatus() { return "disconnected"; },
+            getReadyServers() { return []; },
+            getSession() { return undefined; },
+        };
+
+        expect(manager.getStatus("ganglion")).toBe("disconnected");
+        expect(manager.getSession("ganglion")).toBeUndefined();
     });
 });

@@ -18,6 +18,17 @@ bun run typecheck
 | `POST /dev/utterance` | `{"text"}` → the ReAct agent loop, which may call tools such as `speak` |
 | `GET /health` | Connected devices |
 
+### MCP transport
+
+Allow MCP sessions only for explicitly approved Ganglion device IDs with
+`MCP_ALLOWED_GANGLION_DEVICE_IDS=ganglion-laptop-01,ganglion-laptop-02`. An empty or missing
+allowlist fails closed for MCP while still allowing the ordinary authenticated device connection.
+MCP uses the existing authenticated WebSocket and does not open another listener.
+
+The current development handshake uses a shared `DEV_TOKEN`; it authenticates possession of the
+shared token but does not provide cryptographic per-device identity binding. The MCP allowlist is an
+additional server-side authorization check, not a replacement for stronger device credentials.
+
 The `/dev/*` endpoints carry no token, which is why the hub binds to `127.0.0.1` by default. Set
 `HOST=0.0.0.0` only deliberately — for example, so a phone on the same Wi-Fi can reach it.
 

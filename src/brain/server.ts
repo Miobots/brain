@@ -22,6 +22,9 @@ import { deviceCommands } from "./command-store.ts";
 import { resetSequence, checkSequence } from "./sequence-tracker.ts";
 import { runAgentLoop } from "./agent.ts";
 import { devices, deviceRoles, deviceSeq, resolveHeartDeviceId } from "./devices.ts";
+import { deviceGenerations } from "./devices.ts";
+import { mcpConnectionManager } from "../agents/mcp-agent/manager.ts";
+import type { MCPAuthenticatedPeer } from "../agents/mcp-agent/types.ts";
 import { brainManifest } from "./capabilities.ts";
 import { describeSituation, recordBattery, robotSituations } from "./context.ts";
 import {
@@ -260,6 +263,7 @@ export const wss = new WebSocketServer({
 
 wss.on("connection", (ws) => {
     let deviceId: string | undefined;
+    let generation = 0;
     // Created per socket, before the handshake: even a rejection ACK counts on this connection.
     const outboundSeq = new SequenceCounter();
 
@@ -334,6 +338,11 @@ wss.on("connection", (ws) => {
 
         const envelope = brainData.data;
 
+        if (deviceId && (devices.get(deviceId) !== ws || deviceGenerations.get(deviceId) !== generation)) {
+            console.log(`[SERVER] Ignoring message from stale connection device=${deviceId}`);
+            return;
+        }
+
         // ENVELOPE.md §6: "Past it, the receiver rejects with reason `expired` and logs it."
         // Dropping it silently left the sender waiting for an ACK that was never coming, which
         // reads as a timeout rather than as the refusal it actually is.
@@ -370,6 +379,15 @@ wss.on("connection", (ws) => {
             }
 
             const hello = envelope.payload as HelloPayload;
+            if (!Object.values(DeviceRole).includes(hello.role)) {
+                ws.send(encode(createWelcomeAck(envelope, {
+                    accepted: false,
+                    reason: "invalid device role",
+                    seq: outboundSeq,
+                })));
+                ws.close();
+                return;
+            }
             if (hello.token !== config.devToken) {
                 const badWelcome = createWelcomeAck(envelope, {
                     accepted: false,
@@ -383,9 +401,16 @@ wss.on("connection", (ws) => {
             }
 
             deviceId = hello.device_id;
+            generation = (deviceGenerations.get(deviceId) ?? 0) + 1;
+            const previousSocket = devices.get(deviceId);
+            resetSequence(deviceId);
+            if (previousSocket && previousSocket !== ws) {
+                previousSocket.close();
+            }
             devices.set(deviceId, ws);
             deviceSeq.set(deviceId, outboundSeq);
             deviceRoles.set(deviceId, hello.role);
+            deviceGenerations.set(deviceId, generation);
             if (!deviceCommands.has(deviceId)) {
                 deviceCommands.set(deviceId, new Map());
             }
@@ -395,6 +420,13 @@ wss.on("connection", (ws) => {
             ws.send(encode(welcome));
             console.log(`[SERVER] welcome Ack Sent`);
             startHeartbeat();
+
+            if (hello.role === DeviceRole.GANGLION) {
+                const peer: MCPAuthenticatedPeer = { deviceId, socket: ws, generation };
+                void mcpConnectionManager.attach(peer).catch((error: unknown) => {
+                    console.log(`[SERVER] MCP attach failed device=${deviceId} reason=${error instanceof Error ? error.message : "unknown"}`);
+                });
+            }
 
             // An app that has just connected should not stare at a blank screen until the next
             // publish tick, so replay what we already know.
@@ -413,12 +445,28 @@ wss.on("connection", (ws) => {
             return;
         }
 
+        if (devices.get(deviceId) !== ws || deviceGenerations.get(deviceId) !== generation) {
+            console.log(`[SERVER] Ignoring message from stale connection device=${deviceId}`);
+            return;
+        }
+
         if (!checkSequence(deviceId, envelope.seq, envelope.kind)) {
             return;
         }
 
         if (envelope.kind === Kind.ACK) {
-            handleAck(envelope);
+            handleAck(envelope, { deviceId, socket: ws });
+        }
+        if (envelope.kind === Kind.EVT &&
+            (envelope.topic === Topics.MCP_RESPONSE || envelope.topic === Topics.MCP_NOTIFICATION)) {
+            if (deviceRoles.get(deviceId) === DeviceRole.GANGLION) {
+                mcpConnectionManager.handleEnvelope({ deviceId, socket: ws, generation }, envelope);
+            }
+        }
+        if (envelope.kind === Kind.CMD && envelope.topic === Topics.MCP_REQUEST) {
+            if (deviceRoles.get(deviceId) === DeviceRole.GANGLION) {
+                mcpConnectionManager.rejectServerRequest({ deviceId, socket: ws, generation }, envelope, outboundSeq.next());
+            }
         }
         if (envelope.kind === Kind.EVT && envelope.topic === Topics.SYS_HEARTBEAT) {
             // Liveness is recorded, not answered. The outbound beat is on its own timer.
@@ -449,10 +497,15 @@ wss.on("connection", (ws) => {
     ws.on("close", () => {
         stopHeartbeat();
         if (deviceId) {
-            resetSequence(deviceId);
-            devices.delete(deviceId);
-            deviceSeq.delete(deviceId);
-            deviceRoles.delete(deviceId);
+            const isCurrent = devices.get(deviceId) === ws && deviceGenerations.get(deviceId) === generation;
+            if (isCurrent) {
+                resetSequence(deviceId);
+                devices.delete(deviceId);
+                deviceSeq.delete(deviceId);
+                deviceRoles.delete(deviceId);
+                deviceGenerations.delete(deviceId);
+                void mcpConnectionManager.detach({ deviceId, socket: ws, generation });
+            }
             // The manifest is deliberately kept: an app must be able to show last-known state
             // with a staleness marker when the robot is off (TASKS.md S1.2, third row).
             console.log(`[SERVER] Device disconnected: ${deviceId}`);

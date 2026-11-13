@@ -9,6 +9,10 @@ let _max_message_size: number | undefined;
 let _idempotency_ttl_ms: number | undefined;
 let _idempotency_cleanup_interval_ms: number | undefined;
 let _command_expiry_ms: number | undefined;
+let _mcp_request_timeout_ms: number | undefined;
+let _mcp_max_pending_requests: number | undefined;
+let _mcp_rate_limit_per_second: number | undefined;
+let _mcp_outbound_high_water_mark: number | undefined;
 
 export const config = {
     get port(): number {
@@ -63,5 +67,35 @@ export const config = {
     },
     set command_expiry_ms(val: number) {
         _command_expiry_ms = val;
+    },
+    get mcpAllowedGanglionDeviceIds(): string[] {
+        return (process.env.MCP_ALLOWED_GANGLION_DEVICE_IDS ?? "")
+            .split(",")
+            .map((value) => value.trim())
+            .filter((value) => value.length > 0);
+    },
+    get mcp_request_timeout_ms(): number {
+        return _mcp_request_timeout_ms ?? (Number(process.env.MCP_REQUEST_TIMEOUT_MS) || 15_000);
+    },
+    set mcp_request_timeout_ms(val: number) {
+        _mcp_request_timeout_ms = val;
+    },
+    get mcp_max_pending_requests(): number {
+        return _mcp_max_pending_requests ?? (Number(process.env.MCP_MAX_PENDING_REQUESTS) || 16);
+    },
+    set mcp_max_pending_requests(val: number) {
+        _mcp_max_pending_requests = val;
+    },
+    get mcp_rate_limit_per_second(): number {
+        return _mcp_rate_limit_per_second ?? (Number(process.env.MCP_RATE_LIMIT_PER_SECOND) || 32);
+    },
+    set mcp_rate_limit_per_second(val: number) {
+        _mcp_rate_limit_per_second = val;
+    },
+    get mcp_outbound_high_water_mark(): number {
+        return _mcp_outbound_high_water_mark ?? (Number(process.env.MCP_OUTBOUND_HIGH_WATER_MARK) || 512 * 1024);
+    },
+    set mcp_outbound_high_water_mark(val: number) {
+        _mcp_outbound_high_water_mark = val;
     },
 };

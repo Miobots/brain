@@ -7,6 +7,7 @@ export const devices = new Map<string, WebSocket>();
 
 /** Roles recorded from the authenticated sys.hello handshake. */
 export const deviceRoles = new Map<string, DeviceRole>();
+export const deviceGenerations = new Map<string, number>();
 
 /**
  * Resolves a connected physical robot using trusted handshake state.
