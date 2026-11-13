@@ -5,6 +5,7 @@ export * from "./command-store.ts";
 export * from "./sequence-tracker.ts";
 export * from "./tools.ts";
 export * from "./agent.ts";
+export * from "../agents/mcp-agent/index.ts";
 
 
 
