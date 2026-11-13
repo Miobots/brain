@@ -47,14 +47,14 @@ export interface MCPSession {
   addNotificationListener(listener: (notification: MCPNotification) => void): () => void;
 }
 
-export interface MCPToolRegistry {
+export interface MCPToolRegistryContract {
   discover(sessions: Iterable<MCPSession>): Promise<MCPToolDefinition[]>;
   getAvailableTools(): MCPToolDefinition[];
   getTool(qualifiedName: string): MCPToolDefinition | undefined;
   refresh(serverId?: string): Promise<MCPToolDefinition[]>;
 }
 
-export interface MCPToolExecutor {
+export interface MCPToolExecutorContract {
   execute(call: MCPToolCall): Promise<MCPToolExecutionResult>;
 }
 

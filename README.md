@@ -29,6 +29,14 @@ The current development handshake uses a shared `DEV_TOKEN`; it authenticates po
 shared token but does not provide cryptographic per-device identity binding. The MCP allowlist is an
 additional server-side authorization check, not a replacement for stronger device credentials.
 
+### MCP tool execution
+
+The persistent MCP connection manager owns authenticated sessions and discovery. Phase 5 adds a
+separate registry and executor: discovered metadata is namespaced per server, arguments are validated
+before execution, and Brain-side permission policy is checked before routing through the manager's
+session. Unknown tools, unavailable servers, malformed schemas, and unknown permission classes fail
+closed. Results remain typed; output normalization and artifact handling are later-phase concerns.
+
 The `/dev/*` endpoints carry no token, which is why the hub binds to `127.0.0.1` by default. Set
 `HOST=0.0.0.0` only deliberately — for example, so a phone on the same Wi-Fi can reach it.
 
