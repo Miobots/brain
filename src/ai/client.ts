@@ -8,7 +8,7 @@
  * Turn-level retry policy, backoff timing, and user feedback are owned by the caller / agent loop (`src/brain/agent.ts`).
  */
 
-import { generateText, streamText, jsonSchema, type ModelMessage, type SystemModelMessage, type ToolSet } from 'ai';
+import { generateText, streamText, jsonSchema, type FilePart, type ModelMessage, type SystemModelMessage, type ToolSet } from 'ai';
 import { resolveModel } from './providers/resolve.js';
 import { resolveAttachments } from './attachments/resolve.js';
 import { builtinTools } from './tools/index.js';
@@ -35,7 +35,16 @@ export async function toModelMessages(messages: ChatMessage[], kind: ProviderKin
   const out: ModelMessage[] = [];
   for (const m of messages) {
     if (m.role === 'tool') {
-      // Tool results are text-only outputs in the wire protocol and do not carry attachments.
+      const files = await resolveAttachments(m.attachments, kind);
+      const output = files.length
+        ? {
+            type: 'content' as const,
+            value: [
+              ...(m.content ? [{ type: 'text' as const, text: m.content }] : []),
+              ...files.map(toToolResultFile),
+            ],
+          }
+        : { type: 'text' as const, value: m.content };
       out.push({
         role: 'tool',
         content: [
@@ -43,10 +52,10 @@ export async function toModelMessages(messages: ChatMessage[], kind: ProviderKin
             type: 'tool-result',
             toolCallId: m.toolCallId ?? '',
             toolName: m.name ?? '',
-            output: { type: 'text', value: m.content },
+            output,
           },
         ],
-      });
+      } as ModelMessage);
       continue;
     }
 
@@ -77,6 +86,21 @@ export async function toModelMessages(messages: ChatMessage[], kind: ProviderKin
   return out;
 }
 
+function toToolResultFile(file: FilePart) {
+  const data = file.data;
+  const taggedData = data instanceof URL
+    ? { type: 'url' as const, url: data }
+    : typeof data === 'string' || data instanceof Uint8Array || data instanceof ArrayBuffer
+      ? { type: 'data' as const, data }
+      : { type: 'reference' as const, reference: data };
+  return {
+    type: 'file' as const,
+    data: taggedData,
+    mediaType: file.mediaType,
+    ...(file.filename ? { filename: file.filename } : {}),
+  };
+}
+
 // AI SDK v7 rejects system messages inside `messages` ("Use the instructions option instead"), so
 // they are lifted out into `instructions`. Every conversation the agent builds starts with one.
 export async function toPrompt(
@@ -90,8 +114,8 @@ export async function toPrompt(
 }
 
 // converts application tool definition into AI SDK format
-function toToolSet(tools: ToolDefinition[] | undefined): ToolSet | undefined {
-  const all = [...builtinTools, ...(tools ?? [])];
+function toToolSet(tools: ToolDefinition[] | undefined, includeBuiltinTools = true): ToolSet | undefined {
+  const all = [...(includeBuiltinTools ? builtinTools : []), ...(tools ?? [])];
   if (!all.length) return undefined;
 
   const set: ToolSet = {};
@@ -137,7 +161,7 @@ export async function chat(req: ChatRequest): Promise<ChatResult> {
   try {
     const { model, provider, modelName, kind } = resolveModel(req.capability);
     const prompt = await toPrompt(req.messages, kind);
-    const tools = toToolSet(req.tools);
+    const tools = toToolSet(req.tools, req.includeBuiltinTools);
     const aiToolChoice = toAiSdkToolChoice(req.toolChoice);
 
     const started = Date.now();
@@ -206,7 +230,7 @@ export async function stream(req: ChatRequest): Promise<StreamHandle> {
   try {
     const { model, provider, modelName, kind } = resolveModel(req.capability);
     const prompt = await toPrompt(req.messages, kind);
-    const tools = toToolSet(req.tools);
+    const tools = toToolSet(req.tools, req.includeBuiltinTools);
     const aiToolChoice = toAiSdkToolChoice(req.toolChoice);
     const started = Date.now();
 

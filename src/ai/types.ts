@@ -42,6 +42,7 @@ export interface ChatRequest {
   messages: ChatMessage[];
 
   tools?: ToolDefinition[];
+  includeBuiltinTools?: boolean;
   toolChoice?: ToolChoice;
 
   temperature?: number;

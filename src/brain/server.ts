@@ -260,6 +260,7 @@ export const httpServer = http.createServer((req, res) => {
 
 let mcpSmokeTestStarted = false;
 
+
 async function runMcpSmokeTest(deviceId: string): Promise<void> {
     if (process.env.MCP_SMOKE_TEST !== "1" || mcpSmokeTestStarted) {
         return;
@@ -278,10 +279,9 @@ async function runMcpSmokeTest(deviceId: string): Promise<void> {
         (tool) => tool.name === "system.get_status",
     );
 
-    if (!statusTool) {
-        console.error("[MCP SMOKE TEST] system.get_status was not discovered.");
-        return;
-    }
+    const screenshotTool = discoveredTools.find(
+        (tool) => tool.name === "screen.get_screenshot",
+    );
 
     const registry = new MCPToolRegistry(mcpConnectionManager);
 
@@ -298,17 +298,45 @@ async function runMcpSmokeTest(deviceId: string): Promise<void> {
             },
         );
 
-        console.log(`\n[MCP SMOKE TEST] Calling ${statusTool.qualifiedName}...`);
+        // Test 1: System status
+        if (statusTool) {
+            console.log(`\n[MCP SMOKE TEST] Calling ${statusTool.qualifiedName}...`);
 
-        const result = await executor.execute(statusTool.qualifiedName, {});
+            const result = await executor.execute(statusTool.qualifiedName, {});
 
-        console.log("\n[MCP SMOKE TEST] Execution result:");
-        console.dir(result, { depth: null });
+            console.log("\n[MCP SMOKE TEST] System status result:");
+            console.dir(result, { depth: null });
 
-        if (result.ok) {
-            console.log("\n[MCP SMOKE TEST] SUCCESS");
+            console.log(
+                result.ok
+                    ? "\n[MCP SMOKE TEST] SYSTEM STATUS SUCCESS"
+                    : "\n[MCP SMOKE TEST] SYSTEM STATUS FAILED",
+            );
         } else {
-            console.error("\n[MCP SMOKE TEST] FAILED:", result.error);
+            console.error("[MCP SMOKE TEST] system.get_status was not discovered.");
+        }
+
+        // Test 2: Screenshot
+        if (screenshotTool) {
+            console.log(`\n[MCP SMOKE TEST] Calling ${screenshotTool.qualifiedName}...`);
+
+            const result = await executor.execute(
+                screenshotTool.qualifiedName,
+                { interactive: true },
+            );
+            console.log("[MCP DEBUG] Result keys:", Object.keys(result));
+
+            console.log("\n[MCP SMOKE TEST] Screenshot result:");
+
+            if (result.ok) {
+                console.log("  Screenshot tool executed successfully.");
+                console.dir(result.output, { depth: 2 });
+            } else {
+                 console.error("[MCP SMOKE TEST] Screenshot execution failed:");
+                 console.dir(result, { depth: null });
+            }
+        } else {
+            console.error("[MCP SMOKE TEST] screen.get_screenshot was not discovered.");
         }
     } catch (error) {
         console.error("[MCP SMOKE TEST] Error:", error);
@@ -316,6 +344,7 @@ async function runMcpSmokeTest(deviceId: string): Promise<void> {
         registry.destroy();
     }
 }
+
 export const wss = new WebSocketServer({
     server: httpServer,
     path: "/ws",

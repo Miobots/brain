@@ -404,14 +404,85 @@ tools.push({
     return typeof item.uri === "string" && item.uri.length > 0 && item.uri.length <= 2048;
   }
 
+
   private mapContent(value: unknown): import("./types.ts").OutputBlock | undefined {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return undefined;
+    }
+
     const item = value as Record<string, unknown>;
-    if (item.type === "text" && typeof item.text === "string") return { type: "text", text: item.text };
-    if (item.type === "json" && "json" in item) return { type: "json", value: item.json };
-    if (item.type === "resource" && typeof item.uri === "string") return { type: "resource", resource: { artifactId: item.uri, uri: item.uri, mediaType: typeof item.mimeType === "string" ? item.mimeType : undefined } };
+
+    // Text content
+    if (item.type === "text" && typeof item.text === "string") {
+      return { type: "text", text: item.text };
+    }
+
+    // JSON content
+    if (item.type === "json" && "json" in item) {
+      return { type: "json", value: item.json };
+    }
+
+    // Image content
+    if (
+      item.type === "image" &&
+      typeof item.data === "string" &&
+      typeof item.mimeType === "string"
+    ) {
+      const supportedMimeTypes = [
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+      ];
+
+      if (!supportedMimeTypes.includes(item.mimeType)) {
+        return undefined;
+      }
+
+      // Validate base64 before decoding
+      if (
+        item.data.length === 0 ||
+        item.data.length % 4 !== 0 ||
+        !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(item.data)
+      ) {
+        return undefined;
+      }
+
+      const extension =
+        item.mimeType === "image/jpeg"
+          ? "jpg"
+          : item.mimeType.split("/")[1];
+
+      return {
+          type: "image",
+          source: {
+            source: {
+              data: Buffer.from(item.data, "base64"),
+              filename: `screenshot.${extension}`,
+            },
+            mediaType: item.mimeType,
+          },
+          mediaType: item.mimeType,
+        };
+    }
+
+    // Resource content
+    if (item.type === "resource" && typeof item.uri === "string") {
+      return {
+        type: "resource",
+        resource: {
+          artifactId: item.uri,
+          uri: item.uri,
+          mediaType:
+            typeof item.mimeType === "string"
+              ? item.mimeType
+              : undefined,
+        },
+      };
+    }
+
     return undefined;
   }
+
 }
 
 export type MCPTransportPeer = MCPAuthenticatedPeer;
