@@ -352,7 +352,20 @@ tools.push({
         },
       };
     }
-    return { ok: (result as Record<string, unknown>).isError !== true, output, isError: (result as Record<string, unknown>).isError === true };
+    const isError = (result as Record<string, unknown>).isError === true;
+    if (!isError) return { ok: true, output, isError: false };
+
+    const errorText = output.find((block) => block.type === "text")?.text;
+    const remoteError = parseRemoteToolError(errorText);
+    return {
+      ok: false,
+      output,
+      isError: true,
+      error: remoteError ?? {
+        code: "remote_tool_error",
+        message: errorText?.slice(0, 512) || "MCP tool returned an error",
+      },
+    };
   }
 
   addNotificationListener(listener: (notification: MCPNotification) => void): () => void {
@@ -483,6 +496,19 @@ tools.push({
     return undefined;
   }
 
+}
+
+function parseRemoteToolError(text: string | undefined): { code: string; message: string } | undefined {
+  if (!text) return undefined;
+  try {
+    const value: unknown = JSON.parse(text);
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+    const error = value as Record<string, unknown>;
+    if (typeof error.code !== "string" || typeof error.message !== "string") return undefined;
+    return { code: error.code.slice(0, 128), message: error.message.slice(0, 512) };
+  } catch {
+    return undefined;
+  }
 }
 
 export type MCPTransportPeer = MCPAuthenticatedPeer;

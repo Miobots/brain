@@ -35,8 +35,12 @@ additional server-side authorization check, not a replacement for stronger devic
 The MCP Agent has its own conversation and execution loop, separate from the Brain Tools Agent.
 It discovers tools from authenticated MCP connections, asks the configured model to select tools,
 and executes calls through Brain's permission- and schema-validating MCP executor. The development
-endpoint is read-only: tools not classified as `read` are denied. MCP tool calls, results, errors,
-and progress are logged by the Brain server; prompt and tool-result contents are not logged.
+endpoint is read-only by default. To enable filesystem actions, set
+`MCP_DEV_ALLOW_FILESYSTEM_ACTIONS=true` in both Brain and Ganglion environments and restart both
+processes. Brain only permits tools named `filesystem.*`; Ganglion still confines them to the
+configured approved directories. Deletion requires `confirmed: true`, and recursive deletion also
+requires `recursive: true`. MCP tool calls, results, errors, and progress are logged by the Brain
+server; prompt and tool-result contents are not logged.
 
 Run Brain, Ganglion, and the interactive client in separate terminals:
 

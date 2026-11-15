@@ -119,6 +119,42 @@ describe("Brain MCP transport and session", () => {
         unsubscribe();
     });
 
+    it("preserves structured MCP tool errors returned by Ganglion", async () => {
+        const { client, seq } = await connectGanglion();
+        client.on("message", (raw) => {
+            const envelope = rawEnvelope(raw);
+            if (envelope.kind !== Kind.CMD) return;
+            const payload = envelope.payload as { method?: string; id?: string };
+            client.send(encode(createAck(envelope, { accepted: true }, seq)));
+            if (envelope.topic !== Topics.MCP_REQUEST) return;
+            if (payload.method === "initialize") sendMcpResponse(client, seq, envelope.corr_id, String(payload.id), {
+                protocolVersion: "2025-06-18", capabilities: {}, serverInfo: { name: "test-ganglion" },
+            });
+            if (payload.method === "tools/list") sendMcpResponse(client, seq, envelope.corr_id, String(payload.id), {
+                tools: [{ name: "filesystem.write_file", inputSchema: { type: "object" }, _meta: { "miobots/permission": "action" } }],
+            });
+            if (payload.method === "tools/call") sendMcpResponse(client, seq, envelope.corr_id, String(payload.id), {
+                isError: true,
+                content: [{ type: "text", text: JSON.stringify({ code: "approval_required", message: "Trusted approval is required" }) }],
+            });
+        });
+
+        await waitForSession("ganglion-test");
+        const session = mcpConnectionManager.getSession("ganglion-test")!;
+        const [tool] = await session.listTools();
+        const result = await session.callTool({
+            id: "write-1",
+            toolName: tool!.qualifiedName,
+            serverId: "ganglion-test",
+            arguments: { path: "/tmp/note.txt", content: "hello" },
+        });
+        expect(result).toMatchObject({
+            ok: false,
+            isError: true,
+            error: { code: "approval_required", message: "Trusted approval is required" },
+        });
+    });
+
     it("fails closed for a non-allowlisted Ganglion", async () => {
         const { client } = await connectGanglion("other-ganglion");
         await new Promise((resolve) => setTimeout(resolve, 50));

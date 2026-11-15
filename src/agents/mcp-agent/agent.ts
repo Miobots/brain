@@ -17,7 +17,7 @@ import type {
   OutputBlock,
 } from "./types.ts";
 
-export const DEFAULT_MCP_AGENT_MAX_ITERATIONS = 5;
+export const DEFAULT_MCP_AGENT_MAX_ITERATIONS = 15;
 
 export interface MCPAgentDependencies {
   registry: MCPToolRegistry;

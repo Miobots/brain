@@ -33,6 +33,7 @@ import {
 } from "./navigation.ts";
 import { MCPToolRegistry } from "../agents/mcp-agent/tool-registry.ts";
 import { MCPToolExecutor } from "../agents/mcp-agent/tool-executor.ts";
+import { createMCPDevPermissionProvider } from "../agents/mcp-agent/dev-permission-provider.ts";
 import { MCPAgentRunner } from "../agents/mcp-agent/agent.ts";
 import type { MCPCallOptions, MCPModelRole } from "../agents/mcp-agent/types.ts";
 
@@ -69,7 +70,7 @@ class LoggingReadOnlyMCPToolExecutor extends MCPToolExecutor {
 const mcpDevExecutor = new LoggingReadOnlyMCPToolExecutor(
     mcpDevRegistry,
     mcpConnectionManager,
-    { permissionProvider: { authorize: async ({ tool }) => ({ allowed: tool.permission === "read" }) } },
+    { permissionProvider: createMCPDevPermissionProvider(process.env.MCP_DEV_ALLOW_FILESYSTEM_ACTIONS === "true") },
 );
 const mcpDevAgent = new MCPAgentRunner({
     registry: mcpDevRegistry,

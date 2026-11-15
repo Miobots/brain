@@ -3,6 +3,7 @@ import type { MCPConnectionManager, MCPSession } from "../../../src/agents/mcp-a
 import type { MCPConnectionStatus, MCPServerInfo, MCPToolCall, MCPToolDefinition, MCPToolExecutionResult } from "../../../src/agents/mcp-agent/types.ts";
 import { MCPToolRegistry } from "../../../src/agents/mcp-agent/tool-registry.ts";
 import { MCPToolExecutor, type MCPToolPermissionProvider } from "../../../src/agents/mcp-agent/tool-executor.ts";
+import { createMCPDevPermissionProvider } from "../../../src/agents/mcp-agent/dev-permission-provider.ts";
 
 function tool(serverId: string, name: string, permission: "read" | "action" = "read"): MCPToolDefinition {
     return {
@@ -97,6 +98,23 @@ describe("MCP Phase 5 tool registry and executor", () => {
         const allowed = new MCPToolExecutor(registry, fakeManager(session), { permissionProvider: permission(true) });
         await allowed.execute(definition.qualifiedName, { value: "a" });
         expect(execute).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps MCP DEV actions disabled by default and scopes opt-in to filesystem actions", async () => {
+        const provider = createMCPDevPermissionProvider(false);
+        const registry = new MCPToolRegistry();
+        const read = registry.register({ ...tool("ganglion-dev-01", "filesystem.list", "read"), originalName: "filesystem.list" })[0]!;
+        const write = registry.register({ ...tool("ganglion-dev-01", "filesystem.write_file", "action"), originalName: "filesystem.write_file" })[0]!;
+        const unrelated = registry.register({ ...tool("other-server", "system.shutdown", "action"), originalName: "system.shutdown" })[0]!;
+        await expect(provider.authorize({ tool: read, arguments: {} })).resolves.toMatchObject({ allowed: true });
+        await expect(provider.authorize({ tool: write, arguments: {} })).resolves.toMatchObject({ allowed: false, code: "permission_denied" });
+
+        const enabled = createMCPDevPermissionProvider(true);
+        await expect(enabled.authorize({ tool: write, arguments: {} })).resolves.toMatchObject({ allowed: true });
+        await expect(enabled.authorize({ tool: unrelated, arguments: {} })).resolves.toMatchObject({ allowed: false });
+        const deletion = registry.register({ ...tool("ganglion-dev-01", "filesystem.delete", "action"), originalName: "filesystem.delete" })[0]!;
+        await expect(enabled.authorize({ tool: deletion, arguments: {} })).resolves.toMatchObject({ allowed: false });
+        await expect(enabled.authorize({ tool: deletion, arguments: { confirmed: true } })).resolves.toMatchObject({ allowed: true });
     });
 
     it("fails closed for an unknown permission classification", async () => {
