@@ -7,11 +7,13 @@ import type {
     MCPAgent,
     MCPConnectionManager,
     MCPModelGateway,
+    MCPSession,
     MCPToolDefinition,
     OutputBlock,
     TaskBudget,
 } from "../../../src/agents/mcp-agent/index.ts";
 import { MCPToolRegistry } from "../../../src/agents/mcp-agent/tool-registry.ts";
+import type { MCPToolPermissionProvider } from "../../../src/agents/mcp-agent/tool-executor.ts";
 import type { MCPToolExecutionResult } from "../../../src/agents/mcp-agent/types.ts";
 
 describe("MCP Agent contracts", () => {
@@ -317,11 +319,20 @@ describe("MCP Agent execution loop", () => {
             .mockResolvedValueOnce(modelSuccess(undefined, [modelToolCall("image-call", definition.qualifiedName)]))
             .mockResolvedValueOnce(modelSuccess("I can see the screen."));
 
-        const result = await runMCPAgent({ instruction: "Inspect the screen" }, deps);
+        const result = await runMCPAgent({ instruction: "Inspect the screen" }, deps, { modelRole: "fast" });
 
         expect(result.status).toBe("completed");
+        expect(deps.chat.mock.calls.map(([request]) => request.capability)).toEqual(["fast", "vision"]);
+        expect(deps.chat.mock.calls[1]![0].messages.map((message) => message.role)).toEqual([
+            "system", "user", "assistant", "tool", "user",
+        ]);
         expect(deps.chat.mock.calls[1]![0].messages[3]).toMatchObject({
             role: "tool",
+            toolCallId: "image-call",
+        });
+        expect(deps.chat.mock.calls[1]![0].messages[3]).not.toHaveProperty("attachments");
+        expect(deps.chat.mock.calls[1]![0].messages[4]).toMatchObject({
+            role: "user",
             attachments: [{ mediaType: "image/png", source: { data: bytes, filename: "screen.png" } }],
         });
     });
@@ -333,5 +344,62 @@ describe("MCP Agent execution loop", () => {
         const result = await new MCPAgentRunner(deps).execute({ instruction: "Start" });
 
         expect(result.status).toBe("completed");
+    });
+
+    it("runs the Check my system status scenario through the MCP executor", async () => {
+        const status = {
+            hostname: "ganglion-test-host",
+            platform: "linux",
+            release: "test-kernel",
+            uptimeSeconds: 321,
+            cpuCount: 8,
+            memory: { totalBytes: 16_000, freeBytes: 8_000 },
+        };
+        const definition: MCPToolDefinition = {
+            name: "system.get_status",
+            qualifiedName: "mcp__ganglion-test__system__get_status",
+            serverId: "ganglion-test",
+            description: "Return Ganglion host operating system and resource status.",
+            inputSchema: { type: "object", properties: {}, required: [], additionalProperties: false },
+            permission: "read",
+        };
+        const session: MCPSession = {
+            async listTools() { return [definition]; },
+            async listResources() { return []; },
+            async callTool(call) {
+                expect(call.serverId).toBe("ganglion-test");
+                expect(call.toolName).toBe(definition.qualifiedName);
+                expect(call.arguments).toEqual({});
+                return { ok: true, output: [{ type: "json", value: status }] };
+            },
+            addNotificationListener() { return () => undefined; },
+        };
+        const manager = { getSession: (serverId: string) => serverId === "ganglion-test" ? session : undefined } as unknown as MCPConnectionManager;
+        const registry = new MCPToolRegistry();
+        registry.register(definition);
+        const permissionProvider: MCPToolPermissionProvider = {
+            async authorize({ tool }) { return { allowed: tool.permission === "read" }; },
+        };
+        const executor = new MCPToolExecutor(registry, manager, { permissionProvider });
+        const chat = vi.fn<typeof sharedChat>()
+            .mockResolvedValueOnce(modelSuccess(undefined, [modelToolCall("status-call", definition.qualifiedName)]))
+            .mockResolvedValueOnce(modelSuccess("Ganglion is running on Linux with 8 CPUs and about half its memory free."));
+
+        const result = await new MCPAgentRunner({ registry, executor, chat }).execute({
+            instruction: "Check my system status.",
+            serverIds: ["ganglion-test"],
+        }, { modelRole: "fast" });
+
+        expect(result.status).toBe("completed");
+        expect(result.iterations).toBe(2);
+        expect(result.mcpCalls).toBe(1);
+        expect(result.output).toEqual([{ type: "text", text: "Ganglion is running on Linux with 8 CPUs and about half its memory free." }]);
+        expect(chat.mock.calls[0]![0].tools?.map((tool) => tool.name)).toEqual([definition.qualifiedName]);
+        expect(chat.mock.calls[1]![0].messages.at(-1)).toMatchObject({
+            role: "tool",
+            toolCallId: "status-call",
+            name: definition.qualifiedName,
+            content: JSON.stringify(status),
+        });
     });
 });

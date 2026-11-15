@@ -46,6 +46,9 @@ export async function runMCPAgent(
   let finalOutput: OutputBlock[] = [];
   let iterations = 0;
   let mcpCalls = 0;
+  let visionRequired = conversation.some((message) =>
+    message.attachments?.some((attachment) => attachment.mediaType?.startsWith("image/")) ?? false,
+  );
 
   while (iterations < maxIterations) {
     iterations++;
@@ -55,7 +58,7 @@ export async function runMCPAgent(
         correlationId,
         sessionId,
         userId: request.userId,
-        capability: options.modelRole ?? "orchestrator",
+        capability: visionRequired ? "vision" : options.modelRole ?? "orchestrator",
         messages: [...conversation],
         tools,
         includeBuiltinTools: false,
@@ -89,6 +92,8 @@ export async function runMCPAgent(
     }
 
     appendAssistantToolCalls(conversation, modelText, requestedCalls);
+    const followUpAttachments: NonNullable<ChatMessage["attachments"]> = [];
+    const mediaToolNames: string[] = [];
     for (const requestedCall of requestedCalls) {
       const definition = definitions.find((tool) => tool.qualifiedName === requestedCall.name);
       const toolCall: MCPToolCall = {
@@ -129,8 +134,22 @@ export async function runMCPAgent(
         requestedCall.id,
         requestedCall.name,
         observation.content,
-        observation.attachments,
+        [],
       );
+      if (observation.attachments.some((attachment) => attachment.mediaType?.startsWith("image/"))) {
+        visionRequired = true;
+      }
+      if (observation.attachments.length > 0) {
+        followUpAttachments.push(...observation.attachments);
+        mediaToolNames.push(requestedCall.name);
+      }
+    }
+    if (followUpAttachments.length > 0) {
+      conversation.push({
+        role: "user",
+        content: `MCP tool output from ${mediaToolNames.join(", ")} is attached. Use it as evidence when answering the request.`,
+        attachments: followUpAttachments,
+      });
     }
   }
 

@@ -33,8 +33,49 @@ import {
 } from "./navigation.ts";
 import { MCPToolRegistry } from "../agents/mcp-agent/tool-registry.ts";
 import { MCPToolExecutor } from "../agents/mcp-agent/tool-executor.ts";
+import { MCPAgentRunner } from "../agents/mcp-agent/agent.ts";
+import type { MCPCallOptions, MCPModelRole } from "../agents/mcp-agent/types.ts";
 
 export { devices, deviceSeq };
+
+const mcpDevRegistry = new MCPToolRegistry(mcpConnectionManager);
+
+class LoggingReadOnlyMCPToolExecutor extends MCPToolExecutor {
+    override async execute(
+        qualifiedName: string,
+        argumentsValue: Record<string, unknown>,
+        options?: MCPCallOptions & { operation?: string; target?: string },
+    ) {
+        const startedAt = Date.now();
+        console.info(`[MCP DEV] tool started name=${qualifiedName}`);
+        try {
+            const result = await super.execute(qualifiedName, argumentsValue, options);
+            console.info(
+                `[MCP DEV] tool finished name=${qualifiedName} ok=${result.ok} ` +
+                `code=${result.error?.code ?? "none"} outputBlocks=${result.output.length} ` +
+                `durationMs=${Date.now() - startedAt}`,
+            );
+            return result;
+        } catch (error) {
+            console.error(
+                `[MCP DEV] tool threw name=${qualifiedName} durationMs=${Date.now() - startedAt} ` +
+                `error=${error instanceof Error ? error.message : String(error)}`,
+            );
+            throw error;
+        }
+    }
+}
+
+const mcpDevExecutor = new LoggingReadOnlyMCPToolExecutor(
+    mcpDevRegistry,
+    mcpConnectionManager,
+    { permissionProvider: { authorize: async ({ tool }) => ({ allowed: tool.permission === "read" }) } },
+);
+const mcpDevAgent = new MCPAgentRunner({
+    registry: mcpDevRegistry,
+    executor: mcpDevExecutor,
+    manager: mcpConnectionManager,
+});
 
 /**
  * Which registry slot each connection occupies.
@@ -98,6 +139,119 @@ brainManifestTimer.unref?.();
 
 export const httpServer = http.createServer((req, res) => {
     res.setHeader("Content-Type", "application/json");
+
+    if (req.method === "POST" && req.url === "/dev/mcp-agent") {
+        let body = "";
+        let bodyLength = 0;
+        let tooLarge = false;
+
+        req.on("data", (chunk: Buffer) => {
+            bodyLength += chunk.length;
+            if (bodyLength > config.max_message_size) {
+                tooLarge = true;
+                res.writeHead(413);
+                res.end(JSON.stringify({ error: "Payload too large" }));
+                req.destroy();
+                return;
+            }
+            body += chunk.toString("utf-8");
+        });
+
+        req.on("end", async () => {
+            if (tooLarge) return;
+            const badRequest = (error: string) => {
+                res.writeHead(400);
+                res.end(JSON.stringify({ error }));
+            };
+
+            let parsed: unknown;
+            try {
+                parsed = JSON.parse(body || "{}");
+            } catch {
+                return badRequest("Malformed JSON body");
+            }
+            if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+                return badRequest("Body must be a JSON object");
+            }
+
+            const input = parsed as Record<string, unknown>;
+            const instruction = input.instruction;
+            const serverId = input.server_id;
+            const modelRole = input.model_role ?? "fast";
+            const maxIterations = input.max_iterations;
+            const modelRoles: MCPModelRole[] = ["orchestrator", "vision", "fast", "reasoning"];
+
+            if (typeof instruction !== "string" || instruction.trim().length === 0) {
+                return badRequest("Missing or invalid 'instruction' field");
+            }
+            if (serverId !== undefined && (typeof serverId !== "string" || serverId.trim().length === 0)) {
+                return badRequest("'server_id' must be a non-empty string when provided");
+            }
+            if (typeof modelRole !== "string" || !modelRoles.includes(modelRole as MCPModelRole)) {
+                return badRequest("'model_role' must be orchestrator, vision, fast, or reasoning");
+            }
+            if (maxIterations !== undefined &&
+                (typeof maxIterations !== "number" || !Number.isInteger(maxIterations) || maxIterations < 1 || maxIterations > 10)) {
+                return badRequest("'max_iterations' must be an integer from 1 to 10");
+            }
+
+            const serverIds = typeof serverId === "string" ? [serverId.trim()] : undefined;
+            const connectedServers = mcpConnectionManager.getReadyServers();
+            const availableTools = serverIds
+                ? serverIds.flatMap((id) => mcpConnectionManager.getAvailableTools(id))
+                : mcpConnectionManager.getAvailableTools();
+            const selectedTools = availableTools.filter((tool) => !serverIds || serverIds.includes(tool.serverId));
+            const taskId = crypto.randomUUID();
+            const startedAt = Date.now();
+
+            console.info(
+                `[MCP DEV] request started task=${taskId} modelRole=${modelRole} ` +
+                `servers=${connectedServers.map((server) => server.id).join(",") || "none"} ` +
+                `selectedTools=${selectedTools.length}`,
+            );
+            for (const tool of selectedTools) {
+                console.info(`[MCP DEV] tool available name=${tool.qualifiedName} permission=${tool.permission ?? "unknown"}`);
+            }
+
+            if (selectedTools.length === 0) {
+                console.warn(`[MCP DEV] request unavailable task=${taskId} reason=no_available_mcp_tools`);
+                res.writeHead(503);
+                res.end(JSON.stringify({
+                    error: serverIds
+                        ? `No available MCP tools for server '${serverIds[0]}'.`
+                        : "No MCP tools are currently available; connect a Ganglion server first.",
+                    connectedServers: connectedServers.map((server) => ({ id: server.id, name: server.name })),
+                }));
+                return;
+            }
+
+            try {
+                const result = await mcpDevAgent.execute({
+                    instruction: instruction.trim(),
+                    taskId,
+                    serverIds,
+                }, {
+                    modelRole: modelRole as MCPModelRole,
+                    ...(maxIterations ? { budget: { maxIterations } } : {}),
+                });
+                console.info(
+                    `[MCP DEV] request finished task=${taskId} status=${result.status} ` +
+                    `iterations=${result.iterations} modelCalls=${result.modelCalls} mcpCalls=${result.mcpCalls} ` +
+                    `toolNames=${result.toolCalls.map((call) => call.toolName).join(",") || "none"} ` +
+                    `errorCodes=${result.errors.map((error) => error.code).join(",") || "none"} ` +
+                    `durationMs=${Date.now() - startedAt}`,
+                );
+                res.writeHead(result.status === "completed" ? 200 : 502);
+                res.end(JSON.stringify(result));
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                console.error(`[MCP DEV] request threw task=${taskId} durationMs=${Date.now() - startedAt} error=${message}`);
+                res.writeHead(500);
+                res.end(JSON.stringify({ error: message, taskId }));
+            }
+        });
+        return;
+    }
 
     if (req.method === "POST" && req.url === "/dev/utterance") {
         let body = "";
@@ -283,26 +437,12 @@ async function runMcpSmokeTest(deviceId: string): Promise<void> {
         (tool) => tool.name === "screen.get_screenshot",
     );
 
-    const registry = new MCPToolRegistry(mcpConnectionManager);
-
     try {
-        const executor = new MCPToolExecutor(
-            registry,
-            mcpConnectionManager,
-            {
-                permissionProvider: {
-                    authorize: async ({ tool }) => ({
-                        allowed: tool.permission === "read",
-                    }),
-                },
-            },
-        );
-
         // Test 1: System status
         if (statusTool) {
             console.log(`\n[MCP SMOKE TEST] Calling ${statusTool.qualifiedName}...`);
 
-            const result = await executor.execute(statusTool.qualifiedName, {});
+            const result = await mcpDevExecutor.execute(statusTool.qualifiedName, {});
 
             console.log("\n[MCP SMOKE TEST] System status result:");
             console.dir(result, { depth: null });
@@ -320,7 +460,7 @@ async function runMcpSmokeTest(deviceId: string): Promise<void> {
         if (screenshotTool) {
             console.log(`\n[MCP SMOKE TEST] Calling ${screenshotTool.qualifiedName}...`);
 
-            const result = await executor.execute(
+            const result = await mcpDevExecutor.execute(
                 screenshotTool.qualifiedName,
                 { interactive: true },
             );
@@ -340,8 +480,6 @@ async function runMcpSmokeTest(deviceId: string): Promise<void> {
         }
     } catch (error) {
         console.error("[MCP SMOKE TEST] Error:", error);
-    } finally {
-        registry.destroy();
     }
 }
 

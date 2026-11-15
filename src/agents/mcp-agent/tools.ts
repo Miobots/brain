@@ -12,6 +12,7 @@ export function discoverMCPTools(
     const ids = new Set([
       ...registry.listAll().map((tool) => tool.serverId),
       ...manager.getReadyServers().map((server) => server.id),
+      ...manager.getAvailableTools().map((tool) => tool.serverId),
       ...(serverIds ?? []),
     ]);
     for (const serverId of ids) {
