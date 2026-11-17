@@ -11,6 +11,10 @@ import {
     newEnvelope,
     SequenceCounter,
 } from "@miobots/protocol";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pairDevice } from "../../../src/brain/pairing.ts";
 import { config } from "../../../src/brain/config.ts";
 import { devices, deviceRoles } from "../../../src/brain/devices.ts";
 import { mcpConnectionManager } from "../../../src/agents/mcp-agent/manager.ts";
@@ -19,7 +23,6 @@ import type { MCPAuthenticatedPeer } from "../../../src/agents/mcp-agent/types.t
 
 process.env.PORT = "45880";
 process.env.DEV_TOKEN = "mcp-test-token";
-process.env.MCP_ALLOWED_GANGLION_DEVICE_IDS = "ganglion-test";
 process.env.MCP_DEV_HTTP_TOKEN = "mcp-http-test-token";
 config.mcp_request_timeout_ms = 250;
 
@@ -81,6 +84,9 @@ async function waitForSession(serverId: string): Promise<void> {
 describe("Brain MCP transport and session", () => {
     beforeAll(async () => {
         serverModule = await import("../../../src/brain/server.ts");
+        // The test server is shared across files, so pair with the token it is actually running with.
+        process.env.PAIRED_GANGLIONS_FILE = join(mkdtempSync(join(tmpdir(), "brain-pair-")), "paired.json");
+        pairDevice("ganglion-test", "test laptop", config.devToken);
         await new Promise((resolve) => setTimeout(resolve, 30));
     });
 
@@ -158,7 +164,7 @@ describe("Brain MCP transport and session", () => {
         });
     });
 
-    it("fails closed for a non-allowlisted Ganglion", async () => {
+    it("fails closed for an unpaired Ganglion, even with the dev token", async () => {
         const address = serverModule.wss.address();
         const port = address && typeof address !== "string" ? address.port : config.port;
         const client = new WebSocket(`ws://127.0.0.1:${port}/ws`);

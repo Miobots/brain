@@ -1,4 +1,5 @@
 import { createAck, encode, Kind, type Envelope, type JsonRpcResponse } from "@miobots/protocol";
+import { isPaired } from "../../brain/pairing.ts";
 import { config } from "../../brain/config.ts";
 import type { MCPConnectionManager, MCPSession } from "./interfaces.ts";
 import { MCPSessionImpl, MCPTransport } from "./transport.ts";
@@ -26,8 +27,8 @@ export class MCPConnectionManagerImpl implements MCPConnectionManager {
   private readonly toolCatalog = new Map<string, MCPToolDefinition[]>();
 
   async attach(peer: MCPAuthenticatedPeer): Promise<MCPSession> {
-    if (!config.mcpAllowedGanglionDeviceIds.includes(peer.deviceId)) {
-      throw new Error("MCP server is not allowlisted");
+    if (!isPaired(peer.deviceId)) {
+      throw new Error("MCP server is not a paired laptop");
     }
 
     const existing = this.entries.get(peer.deviceId);

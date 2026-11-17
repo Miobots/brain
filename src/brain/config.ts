@@ -68,12 +68,6 @@ export const config = {
     set command_expiry_ms(val: number) {
         _command_expiry_ms = val;
     },
-    get mcpAllowedGanglionDeviceIds(): string[] {
-        return (process.env.MCP_ALLOWED_GANGLION_DEVICE_IDS ?? "")
-            .split(",")
-            .map((value) => value.trim())
-            .filter((value) => value.length > 0);
-    },
     get mcp_request_timeout_ms(): number {
         return _mcp_request_timeout_ms ?? (Number(process.env.MCP_REQUEST_TIMEOUT_MS) || 15_000);
     },
