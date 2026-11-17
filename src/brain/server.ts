@@ -12,7 +12,10 @@ import {
     SequenceCounter,
     ProtocolDefaults,
     DeviceRole,
+    HeartCapabilities,
+    isNavGotoPayload,
     newEnvelope,
+    type AckPayload,
     type HelloPayload,
     type CapabilityManifestPayload,
 } from "@miobots/protocol";
@@ -20,7 +23,7 @@ import { config } from "./config.ts";
 import { createHeartbeat, handleAck, handleHeartBeat, sendCommand } from "./hub.ts";
 import { deviceCommands } from "./command-store.ts";
 import { resetSequence, checkSequence } from "./sequence-tracker.ts";
-import { runAgentLoop } from "./agent.ts";
+import { runAgentLoop, speakUnspokenReply } from "./agent.ts";
 import { devices, deviceRoles, deviceSeq, resolveHeartDeviceId } from "./devices.ts";
 import { deviceGenerations } from "./devices.ts";
 import { mcpConnectionManager } from "../agents/mcp-agent/manager.ts";
@@ -106,6 +109,7 @@ function sendTo<TTopic extends string, TPayload>(
     targetId: string,
     topic: TTopic,
     payload: TPayload,
+    kind: Kind = Kind.EVT,
 ): void {
     const target = devices.get(targetId);
     const targetSeq = deviceSeq.get(targetId);
@@ -114,13 +118,22 @@ function sendTo<TTopic extends string, TPayload>(
     target.send(
         encode(
             newEnvelope({
-                kind: Kind.EVT,
+                kind,
                 topic,
                 payload: payload as never,
                 seq: targetSeq,
             }),
         ),
     );
+}
+
+const latestRobotTelemetry = new Map<string, { sourceId: string; payload: unknown; atMs: number }>();
+
+function relayRobotTelemetry(sourceId: string, topic: string, payload: unknown): void {
+    latestRobotTelemetry.set(topic, { sourceId, payload, atMs: Date.now() });
+    for (const [id, role] of deviceRoles) {
+        if (role === DeviceRole.SYNAPSE) sendTo(id, topic, payload, Kind.TELEM);
+    }
 }
 
 /** Forwards a manifest to every connected app. Heart publishes it; Synapse renders it. */
@@ -327,6 +340,7 @@ export const httpServer = http.createServer((req, res) => {
                     sessionId,
                     userId,
                 });
+                await speakUnspokenReply(response, async (args) => { await speakTool.execute!({ ...args, device_id: targetDeviceId }); });
 
                 const isTimeout = response.error?.includes("timed out") ?? false;
                 res.writeHead(response.ok ? 200 : isTimeout ? 504 : 500);
@@ -716,6 +730,11 @@ if (hello.role === DeviceRole.GANGLION) {
                     if (devices.has(sourceId)) sendTo(deviceId, Topics.CAP_MANIFEST, cached);
                 }
                 sendTo(deviceId, Topics.CAP_MANIFEST, brainManifest(deviceRoles.values()));
+                for (const [topic, cached] of latestRobotTelemetry) {
+                    if (devices.has(cached.sourceId) && Date.now() - cached.atMs < 30_000) {
+                        sendTo(deviceId, topic, cached.payload, Kind.TELEM);
+                    }
+                }
             }
         }
 
@@ -761,6 +780,36 @@ if (hello.role === DeviceRole.GANGLION) {
             );
             latestManifests.set(deviceId, manifest);
             relayManifestToApps(manifest);
+        }
+        if (deviceRoles.get(deviceId) === DeviceRole.SYNAPSE && envelope.kind === Kind.CMD && envelope.topic === Topics.NAV_GOTO) {
+            void (async () => {
+                let response: AckPayload;
+                try {
+                    if (!isNavGotoPayload(envelope.payload)) {
+                        response = { accepted: false, reason: "Invalid navigation goal." };
+                    } else {
+                        const connectedHearts = [...deviceRoles].filter(([id, role]) => role === DeviceRole.HEART && devices.has(id));
+                        if (connectedHearts.length !== 1) throw new Error("Exactly one robot must be connected for map navigation.");
+                        const heartId = resolveHeartDeviceId();
+                        const driving = latestManifests.get(heartId)?.capabilities[HeartCapabilities.DRIVING];
+                        if (driving?.state !== "available") {
+                            response = { accepted: false, reason: "Robot driving is unavailable right now." };
+                        } else {
+                            const ack = await sendCommand(heartId, Topics.NAV_GOTO, envelope.payload, envelope.idem_key, envelope.expires_at);
+                            response = ack.payload as AckPayload;
+                        }
+                    }
+                } catch (error) {
+                    response = { accepted: false, reason: error instanceof Error ? error.message : "Navigation failed." };
+                }
+                if (devices.get(deviceId) === ws && deviceGenerations.get(deviceId) === generation) {
+                    ws.send(encode(createAck(envelope, response, outboundSeq)));
+                }
+            })();
+        }
+        if (deviceRoles.get(deviceId) === DeviceRole.HEART && envelope.kind === Kind.TELEM &&
+            (envelope.topic === Topics.MAP_SNAPSHOT || envelope.topic === Topics.STATE_POSE || envelope.topic === Topics.STATE_BATTERY)) {
+            relayRobotTelemetry(deviceId, envelope.topic, envelope.payload);
         }
         if (envelope.kind === Kind.TELEM && envelope.topic === Topics.STATE_BATTERY) {
             if (!recordBattery(deviceId, envelope.payload)) console.log("[SERVER] Invalid state.battery payload");

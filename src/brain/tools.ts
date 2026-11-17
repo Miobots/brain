@@ -9,6 +9,12 @@ import { sendCommand } from "./hub.ts";
 import { resolveHeartDeviceId } from "./devices.ts";
 import { cancelNavigation, navigateTo } from "./navigation.ts";
 import type { ToolDefinition } from "../ai/types.ts";
+import { MCPAgentRunner } from "../agents/mcp-agent/agent.ts";
+import { mcpConnectionManager } from "../agents/mcp-agent/manager.ts";
+import { MCPToolRegistry } from "../agents/mcp-agent/tool-registry.ts";
+import { MCPToolExecutor } from "../agents/mcp-agent/tool-executor.ts";
+import { createMCPDevPermissionProvider } from "../agents/mcp-agent/dev-permission-provider.ts";
+import type { MCPAgentResult } from "../agents/mcp-agent/types.ts";
 
 /**
  * Returns the deterministic authenticated Heart target for hardware tool commands.
@@ -141,10 +147,72 @@ export const cancelNavigationTool: ToolDefinition = {
   },
 };
 
+export const LAPTOP_UNREACHABLE = "I can't reach your laptop right now.";
+
+export interface AskLaptopDependencies {
+  isConnected: () => boolean;
+  run: (task: string) => Promise<MCPAgentResult>;
+}
+
+/**
+ * The main agent's only door to Ganglion (BRAIN_DECISIONS 26). Never throws: a missing or failing
+ * laptop is one failed step, and the rest of the request carries on.
+ */
+export function createAskLaptopTool(deps: AskLaptopDependencies): ToolDefinition {
+  return {
+    name: "ask_laptop",
+    description:
+      "Ask the user's paired laptop to do a task: check its battery or status, or find and read files in approved folders. " +
+      "Describe the whole task in one sentence; the laptop works out the steps.",
+    parameters: {
+      type: "object",
+      properties: {
+        task: { type: "string", description: "The whole laptop task in plain words." },
+      },
+      required: ["task"],
+    },
+    execute: async (args: Record<string, unknown>) => {
+      const task = typeof args.task === "string" ? args.task.trim() : "";
+      if (!task) return { status: "error", message: "Missing laptop task." };
+      if (!deps.isConnected()) return { status: "unavailable", message: LAPTOP_UNREACHABLE };
+      try {
+        const result = await deps.run(task);
+        const text = result.output
+          .flatMap((block) => (block.type === "text" ? [block.text] : []))
+          .join("\n")
+          .trim();
+        return result.status === "completed"
+          ? { status: "done", answer: text }
+          : { status: "failed", message: text || result.errors[0]?.message || "The laptop task failed." };
+      } catch (error) {
+        return { status: "failed", message: error instanceof Error ? error.message : String(error) };
+      }
+    },
+  };
+}
+
+// Its own executor, always read-only: the dev endpoint's filesystem auto-approval must never be
+// reachable by voice. Action-tier tools wait for G2.3's approval surface.
+const laptopRegistry = new MCPToolRegistry(mcpConnectionManager);
+const laptopAgent = new MCPAgentRunner({
+  registry: laptopRegistry,
+  manager: mcpConnectionManager,
+  executor: new MCPToolExecutor(laptopRegistry, mcpConnectionManager, {
+    permissionProvider: createMCPDevPermissionProvider(false),
+    announceScreenCapture: async () => { await speakTool.execute!({ text: "Taking a look at your screen" }); },
+  }),
+});
+
+export const askLaptopTool = createAskLaptopTool({
+  isConnected: () => mcpConnectionManager.getReadyServers().length > 0,
+  run: (task) => laptopAgent.execute({ instruction: task }, { modelRole: "fast" }),
+});
+
 export const toolRegistry: Record<string, ToolDefinition> = {
   speak: speakTool,
   navigate_to: navigateToTool,
   cancel_navigation: cancelNavigationTool,
+  ask_laptop: askLaptopTool,
 };
 
 function getTargetDeviceId(value: unknown): string {

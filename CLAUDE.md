@@ -42,6 +42,11 @@ sender is a different language on a different machine.
 can verify. Brain must not report on navigation or battery; Heart must not report on smart home or
 Ganglion.
 
+**The main agent reaches Ganglion through one tool, `ask_laptop`, and nothing else**
+(BRAIN_DECISIONS 26). It delegates to the separate MCP agent in `src/agents/mcp-agent/`. Ganglion's
+own tools never enter the main tool list. With no daemon connected, `ask_laptop` returns "I can't
+reach your laptop right now" instead of throwing, so the rest of the request carries on.
+
 ---
 
 ## The rule that governs every new feature
@@ -103,6 +108,12 @@ protocol simultaneously is how a weekend disappears.
 vectors. Vectors need embeddings, which needs an open decision nobody has information to make yet.
 The lexical version failing on a real query set is also the *baseline* that makes the eventual
 upgrade a measured before-and-after rather than one unanchored number.
+
+**Every picture the robot keeps is labelled by a Brain worker, and raw pictures live seven days**
+(BRAIN_DECISIONS 25). The worker is a loop over unprocessed capture rows — **no job queue** —
+running off the request path through the `vision` capability. It stores vectors, but **nothing
+searches them until `B7.4`**; search stays trigram. After seven days the picture and its scene
+vector are deleted. An object row is never deleted by age.
 
 ## Current state
 

@@ -12,6 +12,7 @@ export const SYSTEM_PROMPT =
   "When the user asks the robot to go somewhere, invoke navigate_to; it returns a goal ID immediately while progress continues. " +
   "If the user asks to stop an active drive, invoke cancel_navigation first, before speaking or calling any other tool — the wheels stop before the robot talks; include a goal ID when known, otherwise omit it to cancel the active drive. " +
   "Always execute physical actions via available tools rather than pretending you did. " +
+  "For anything about the user's laptop (its battery, status, or files), invoke ask_laptop with the whole task in one sentence. " +
   "A Situation block below says where you are, your battery, and what you can do right now. " +
   "Resolve requests that name no room (\"turn off the fan\") to the current room without asking which one. " +
   "If a request needs something listed as unavailable, say plainly that you can't do it right now and why — never pretend.";
@@ -192,4 +193,26 @@ function isUserFacingError(error: unknown): error is Error & { userMessage: stri
   return error instanceof Error
     && "userMessage" in error
     && typeof error.userMessage === "string";
+}
+
+/**
+ * Every utterance gets a spoken answer. If the model replied in text without calling `speak`, the
+ * Brain speaks that text itself, so whether the robot talks never depends on the model remembering
+ * to. Best effort: a Heart that cannot speak does not turn an answered request into a failure.
+ */
+export async function speakUnspokenReply(
+  response: AgentResponse,
+  speak: (args: Record<string, unknown>) => Promise<unknown>,
+): Promise<boolean> {
+  if (!response.ok || response.toolCalls.some((call) => call.name === "speak")) return false;
+  // TTS reads markdown literally; the model likes bold numbers.
+  const text = response.text.replace(/[*_`#]/g, "").trim();
+  if (!text) return false;
+  try {
+    await speak({ text, lang: /[\u0600-\u06FF]/.test(text) ? "ur" : "en" });
+    return true;
+  } catch (error) {
+    console.warn(`[AGENT] could not speak the reply: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
 }
