@@ -21,14 +21,12 @@ bun run typecheck
 
 ### MCP transport
 
-Allow MCP sessions only for explicitly approved Ganglion device IDs with
-`MCP_ALLOWED_GANGLION_DEVICE_IDS=ganglion-laptop-01,ganglion-laptop-02`. An empty or missing
-allowlist rejects Ganglion at authentication.
+A laptop daemon is admitted only by **its own paired token** (GANGLION_DECISIONS 29). Pair it once:
+run `bun run pair --folder <folder>` in `miobots-ganglion`, then type the six-digit code into the
+app (Devices → Pair a laptop). Brain keeps only each token's hash, in `data/paired-ganglions.json`
+(gitignored; `PAIRED_GANGLIONS_FILE` overrides the path). The shared `DEV_TOKEN` still admits Heart
+and Synapse, but never a laptop.
 MCP uses the existing authenticated WebSocket and does not open another listener.
-
-The current development handshake uses a shared `DEV_TOKEN`; it authenticates possession of the
-shared token but does not provide cryptographic per-device identity binding. The MCP allowlist is an
-additional server-side authorization check, not a replacement for stronger device credentials.
 
 ### MCP Agent dev chat
 
@@ -54,7 +52,7 @@ Run Brain, Ganglion, and the interactive client in separate terminals:
 # Terminal 1, in brain/: the hub and MCP Agent endpoint
 bun start
 
-# Terminal 2, in ganglion/: connect the allowlisted MCP server to Brain
+# Terminal 2, in ganglion/: connect the paired MCP server to Brain
 bun start
 
 # Terminal 3, in brain/: interactive MCP Agent client
@@ -63,7 +61,7 @@ bun run mcp-chat
 
 Enter a request such as `Check my system status.` Type `:quit` to exit. The client connects to
 `POST /dev/mcp-agent` in the Brain server process, so Brain must be running and Ganglion must be
-connected and included in `MCP_ALLOWED_GANGLION_DEVICE_IDS`.
+paired and connected.
 
 The client defaults to model role `fast` and discovers tools on all connected MCP servers. Options:
 

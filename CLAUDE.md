@@ -47,6 +47,10 @@ Ganglion.
 own tools never enter the main tool list. With no daemon connected, `ask_laptop` returns "I can't
 reach your laptop right now" instead of throwing, so the rest of the request carries on.
 
+**A laptop is admitted by its own paired token, never by the shared dev token** (GANGLION_DECISIONS
+29). Pairing is `sys.pair` + `sys.pair_confirm` in `src/brain/pairing.ts`; Brain stores only token
+hashes. Do not reintroduce a device allowlist or a dev-token path for role `ganglion`.
+
 ---
 
 ## The rule that governs every new feature
