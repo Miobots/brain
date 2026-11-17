@@ -110,6 +110,8 @@ function spoken(toolName: string, args: Record<string, unknown>): string {
  */
 export function createApprovalPermissionProvider(options: {
   announce?: (text: string) => Promise<void>;
+  /** Reach a phone whose app is closed (BRAIN_DECISIONS 28). Fire-and-forget. */
+  notify?: () => Promise<void>;
   ask?: typeof askApps;
 } = {}): MCPToolPermissionProvider {
   const ask = options.ask ?? askApps;
@@ -127,6 +129,7 @@ export function createApprovalPermissionProvider(options: {
 
       const approvalId = randomUUID();
       void options.announce?.(`I need your OK on your phone to ${spoken(toolName, args)}.`).catch(() => undefined);
+      void options.notify?.().catch(() => undefined);
       const outcome = await ask(approvalId, toolName, args);
       if (outcome.approved) {
         console.log(`[APPROVAL] approved id=${approvalId} tool=${toolName} by=${outcome.approvedBy}`);

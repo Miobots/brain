@@ -15,6 +15,7 @@ import {
     HeartCapabilities,
     isNavGotoPayload,
     isPairConfirmPayload,
+    isPushTokenPayload,
     isPairPayload,
     newEnvelope,
     type AckPayload,
@@ -34,6 +35,7 @@ import type { MCPAuthenticatedPeer } from "../agents/mcp-agent/types.ts";
 import { brainManifest } from "./capabilities.ts";
 import { cancelPairing, confirmPairing, isPairedToken, listPaired, requestPairing } from "./pairing.ts";
 import { deliverInbox } from "./approvals.ts";
+import { setPushToken } from "./push.ts";
 import { describeSituation, recordBattery, robotSituations } from "./context.ts";
 import {
     handleNavigationFeedback,
@@ -830,6 +832,12 @@ if (hello.role === DeviceRole.GANGLION) {
                 : { accepted: false, reason: "A pairing code is six digits." };
             ws.send(encode(createAck(envelope, response, outboundSeq)));
             if (response.accepted) relayDevicesToApps();
+        }
+        if (deviceRoles.get(deviceId) === DeviceRole.SYNAPSE && envelope.kind === Kind.CMD && envelope.topic === Topics.SYS_PUSH_TOKEN) {
+            const payload = envelope.payload;
+            if (isPushTokenPayload(payload)) setPushToken(deviceId, payload);
+            const response: AckPayload = isPushTokenPayload(payload) ? { accepted: true } : { accepted: false, reason: "Not an Expo push token." };
+            ws.send(encode(createAck(envelope, response, outboundSeq)));
         }
         if (deviceRoles.get(deviceId) === DeviceRole.SYNAPSE && envelope.kind === Kind.CMD && envelope.topic === Topics.NAV_GOTO) {
             void (async () => {
