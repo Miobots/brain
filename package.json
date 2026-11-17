@@ -14,6 +14,7 @@
     "build": "tsc",
     "start": "bun run src/index.ts",
     "chat": "bun run src/dev/chat.ts",
+    "mcp-chat": "bun run src/dev/mcp-chat.ts",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "test": "bun test"
   },

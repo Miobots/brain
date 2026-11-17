@@ -21,15 +21,67 @@ import { createHeartbeat, handleAck, handleHeartBeat, sendCommand } from "./hub.
 import { deviceCommands } from "./command-store.ts";
 import { resetSequence, checkSequence } from "./sequence-tracker.ts";
 import { runAgentLoop } from "./agent.ts";
-import { devices, deviceSeq } from "./devices.ts";
+import { devices, deviceRoles, deviceSeq, resolveHeartDeviceId } from "./devices.ts";
+import { deviceGenerations } from "./devices.ts";
+import { mcpConnectionManager } from "../agents/mcp-agent/manager.ts";
+import type { MCPAuthenticatedPeer } from "../agents/mcp-agent/types.ts";
 import { brainManifest } from "./capabilities.ts";
 import { describeSituation, recordBattery, robotSituations } from "./context.ts";
 import {
     handleNavigationFeedback,
     handleNavigationResult,
 } from "./navigation.ts";
+import { MCPToolRegistry } from "../agents/mcp-agent/tool-registry.ts";
+import { MCPToolExecutor } from "../agents/mcp-agent/tool-executor.ts";
+import { createMCPDevPermissionProvider } from "../agents/mcp-agent/dev-permission-provider.ts";
+import { MCPAgentRunner } from "../agents/mcp-agent/agent.ts";
+import { discoverMCPTools } from "../agents/mcp-agent/tools.ts";
+import type { MCPCallOptions, MCPModelRole } from "../agents/mcp-agent/types.ts";
+import { speakTool } from "./tools.ts";
 
 export { devices, deviceSeq };
+
+const mcpDevRegistry = new MCPToolRegistry(mcpConnectionManager);
+
+class LoggingReadOnlyMCPToolExecutor extends MCPToolExecutor {
+    override async execute(
+        qualifiedName: string,
+        argumentsValue: Record<string, unknown>,
+        options?: MCPCallOptions & { operation?: string; target?: string },
+    ) {
+        const startedAt = Date.now();
+        console.info(`[MCP DEV] tool started name=${qualifiedName}`);
+        try {
+            const result = await super.execute(qualifiedName, argumentsValue, options);
+            console.info(
+                `[MCP DEV] tool finished name=${qualifiedName} ok=${result.ok} ` +
+                `code=${result.error?.code ?? "none"} outputBlocks=${result.output.length} ` +
+                `durationMs=${Date.now() - startedAt}`,
+            );
+            return result;
+        } catch (error) {
+            console.error(
+                `[MCP DEV] tool threw name=${qualifiedName} durationMs=${Date.now() - startedAt} ` +
+                `error=${error instanceof Error ? error.message : String(error)}`,
+            );
+            throw error;
+        }
+    }
+}
+
+const mcpDevExecutor = new LoggingReadOnlyMCPToolExecutor(
+    mcpDevRegistry,
+    mcpConnectionManager,
+    {
+        permissionProvider: createMCPDevPermissionProvider(process.env.MCP_DEV_ALLOW_FILESYSTEM_ACTIONS === "true"),
+        announceScreenCapture: async () => { await speakTool.execute!({ text: "Taking a look at your screen" }); },
+    },
+);
+const mcpDevAgent = new MCPAgentRunner({
+    registry: mcpDevRegistry,
+    executor: mcpDevExecutor,
+    manager: mcpConnectionManager,
+});
 
 /**
  * Which registry slot each connection occupies.
@@ -38,7 +90,7 @@ export { devices, deviceSeq };
  * slot a connection occupies without inferring it from the device id." The hub read `role` off
  * sys.hello and threw it away, so it had no way to tell a robot from an app.
  */
-export const deviceRoles = new Map<string, DeviceRole>();
+export { deviceRoles } from "./devices.ts";
 
 /**
  * Last capability manifest seen from each device.
@@ -94,6 +146,130 @@ brainManifestTimer.unref?.();
 export const httpServer = http.createServer((req, res) => {
     res.setHeader("Content-Type", "application/json");
 
+    if (req.method === "POST" && req.url === "/dev/mcp-agent") {
+        const token = process.env.MCP_DEV_HTTP_TOKEN;
+        if (!token) {
+            res.writeHead(503);
+            res.end(JSON.stringify({ error: "MCP_DEV_HTTP_TOKEN is required" }));
+            return;
+        }
+        if (req.headers.authorization !== `Bearer ${token}`) {
+            res.writeHead(401);
+            res.end(JSON.stringify({ error: "Unauthorized" }));
+            return;
+        }
+        let body = "";
+        let bodyLength = 0;
+        let tooLarge = false;
+
+        req.on("data", (chunk: Buffer) => {
+            bodyLength += chunk.length;
+            if (bodyLength > config.max_message_size) {
+                tooLarge = true;
+                res.writeHead(413);
+                res.end(JSON.stringify({ error: "Payload too large" }));
+                req.destroy();
+                return;
+            }
+            body += chunk.toString("utf-8");
+        });
+
+        req.on("end", async () => {
+            if (tooLarge) return;
+            const badRequest = (error: string) => {
+                res.writeHead(400);
+                res.end(JSON.stringify({ error }));
+            };
+
+            let parsed: unknown;
+            try {
+                parsed = JSON.parse(body || "{}");
+            } catch {
+                return badRequest("Malformed JSON body");
+            }
+            if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+                return badRequest("Body must be a JSON object");
+            }
+
+            const input = parsed as Record<string, unknown>;
+            const instruction = input.instruction;
+            const serverId = input.server_id;
+            const modelRole = input.model_role ?? "fast";
+            const maxIterations = input.max_iterations;
+            const modelRoles: MCPModelRole[] = ["orchestrator", "vision", "fast", "reasoning"];
+
+            if (typeof instruction !== "string" || instruction.trim().length === 0) {
+                return badRequest("Missing or invalid 'instruction' field");
+            }
+            if (serverId !== undefined && (typeof serverId !== "string" || serverId.trim().length === 0)) {
+                return badRequest("'server_id' must be a non-empty string when provided");
+            }
+            if (typeof modelRole !== "string" || !modelRoles.includes(modelRole as MCPModelRole)) {
+                return badRequest("'model_role' must be orchestrator, vision, fast, or reasoning");
+            }
+            if (maxIterations !== undefined &&
+                (typeof maxIterations !== "number" || !Number.isInteger(maxIterations) || maxIterations < 1 || maxIterations > 5)) {
+                return badRequest("'max_iterations' must be an integer from 1 to 5");
+            }
+
+            const serverIds = typeof serverId === "string" ? [serverId.trim()] : undefined;
+            const connectedServers = mcpConnectionManager.getReadyServers();
+            const availableTools = serverIds
+                ? serverIds.flatMap((id) => mcpConnectionManager.getAvailableTools(id))
+                : mcpConnectionManager.getAvailableTools();
+            const selectedTools = availableTools.filter((tool) => !serverIds || serverIds.includes(tool.serverId));
+            const taskId = crypto.randomUUID();
+            const startedAt = Date.now();
+
+            console.info(
+                `[MCP DEV] request started task=${taskId} modelRole=${modelRole} ` +
+                `servers=${connectedServers.map((server) => server.id).join(",") || "none"} ` +
+                `selectedTools=${selectedTools.length}`,
+            );
+            for (const tool of selectedTools) {
+                console.info(`[MCP DEV] tool available name=${tool.qualifiedName} permission=${tool.permission ?? "unknown"}`);
+            }
+
+            if (selectedTools.length === 0) {
+                console.warn(`[MCP DEV] request unavailable task=${taskId} reason=no_available_mcp_tools`);
+                res.writeHead(503);
+                res.end(JSON.stringify({
+                    error: serverIds
+                        ? `No available MCP tools for server '${serverIds[0]}'.`
+                        : "No MCP tools are currently available; connect a Ganglion server first.",
+                    connectedServers: connectedServers.map((server) => ({ id: server.id, name: server.name })),
+                }));
+                return;
+            }
+
+            try {
+                const result = await mcpDevAgent.execute({
+                    instruction: instruction.trim(),
+                    taskId,
+                    serverIds,
+                }, {
+                    modelRole: modelRole as MCPModelRole,
+                    ...(maxIterations ? { budget: { maxIterations } } : {}),
+                });
+                console.info(
+                    `[MCP DEV] request finished task=${taskId} status=${result.status} ` +
+                    `iterations=${result.iterations} modelCalls=${result.modelCalls} mcpCalls=${result.mcpCalls} ` +
+                    `toolNames=${result.toolCalls.map((call) => call.toolName).join(",") || "none"} ` +
+                    `errorCodes=${result.errors.map((error) => error.code).join(",") || "none"} ` +
+                    `durationMs=${Date.now() - startedAt}`,
+                );
+                res.writeHead(result.status === "completed" ? 200 : 502);
+                res.end(JSON.stringify(result));
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                console.error(`[MCP DEV] request threw task=${taskId} durationMs=${Date.now() - startedAt} error=${message}`);
+                res.writeHead(500);
+                res.end(JSON.stringify({ error: message, taskId }));
+            }
+        });
+        return;
+    }
+
     if (req.method === "POST" && req.url === "/dev/utterance") {
         let body = "";
         let bodyLength = 0;
@@ -135,12 +311,11 @@ export const httpServer = http.createServer((req, res) => {
                 }
             }
 
-            const targetDeviceId =
-                (device_id as string | undefined) ?? (devices.keys().next().value || "heart-sim-01");
             const sessionId = session_id as string | undefined;
             const userId = user_id as string | undefined;
 
             try {
+                const targetDeviceId = resolveHeartDeviceId(device_id as string | undefined);
                 const response = await runAgentLoop({
                     text: text.trim(),
                     deviceId: targetDeviceId,
@@ -158,7 +333,8 @@ export const httpServer = http.createServer((req, res) => {
                 res.end(JSON.stringify(response));
             } catch (err: unknown) {
                 const errorMessage = err instanceof Error ? err.message : String(err);
-                res.writeHead(500);
+                const unavailable = errorMessage.includes("Heart device");
+                res.writeHead(unavailable ? 503 : 500);
                 res.end(
                     JSON.stringify({
                         status: "error",
@@ -188,27 +364,27 @@ export const httpServer = http.createServer((req, res) => {
         req.on("end", async () => {
             try {
                 const parsed = JSON.parse(body || "{}");
+                if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+                    res.writeHead(400);
+                    res.end(JSON.stringify({ error: "Body must be a JSON object", status: "error" }));
+                    return;
+                }
                 const text = parsed.text;
                 const lang = parsed.lang ?? Language.EN;
                 const priority = parsed.priority ?? "normal";
-                const targetDeviceId = parsed.device_id ?? (devices.keys().next().value || "heart-sim-01");
-
                 if (typeof text !== "string" || text.trim().length === 0) {
                     res.writeHead(400);
                     res.end(JSON.stringify({ error: "Missing or invalid 'text' field", status: "error" }));
                     return;
                 }
-
-                if (!devices.has(targetDeviceId)) {
-                    res.writeHead(503);
-                    res.end(
-                        JSON.stringify({
-                            error: `Device '${targetDeviceId}' is not connected`,
-                            status: "error",
-                        })
-                    );
+                if (parsed.device_id !== undefined && typeof parsed.device_id !== "string") {
+                    res.writeHead(400);
+                    res.end(JSON.stringify({ error: "'device_id' must be a string", status: "error" }));
                     return;
                 }
+                const targetDeviceId = resolveHeartDeviceId(
+                    typeof parsed.device_id === "string" ? parsed.device_id : undefined,
+                );
 
                 const ack = await sendCommand(targetDeviceId, Topics.VOICE_SPEAK, {
                     text,
@@ -226,7 +402,7 @@ export const httpServer = http.createServer((req, res) => {
             } catch (err: unknown) {
                 const errorMessage = err instanceof Error ? err.message : String(err);
                 const isTimeout = errorMessage.includes("timed out");
-                res.writeHead(isTimeout ? 504 : 500);
+                res.writeHead(isTimeout ? 504 : errorMessage.includes("Heart device") ? 503 : 500);
                 res.end(
                     JSON.stringify({
                         status: "error",
@@ -253,6 +429,79 @@ export const httpServer = http.createServer((req, res) => {
     res.end(JSON.stringify({ error: "Not found" }));
 });
 
+let mcpSmokeTestStarted = false;
+
+
+async function runMcpSmokeTest(deviceId: string): Promise<void> {
+    if (process.env.MCP_SMOKE_TEST !== "1" || mcpSmokeTestStarted) {
+        return;
+    }
+
+    mcpSmokeTestStarted = true;
+
+    const discoveredTools = discoverMCPTools(mcpDevRegistry, mcpConnectionManager, [deviceId]);
+
+    console.log("\n[MCP SMOKE TEST] Discovered tools:");
+    for (const tool of discoveredTools) {
+        console.log(`  - ${tool.name} (${tool.qualifiedName})`);
+    }
+
+    const statusTool = discoveredTools.find(
+        (tool) => tool.name === "system.get_status",
+    );
+
+    const screenshotTool = discoveredTools.find(
+        (tool) => tool.name === "screen.get_screenshot",
+    );
+
+    try {
+        // Test 1: System status
+        if (statusTool) {
+            console.log(`\n[MCP SMOKE TEST] Calling ${statusTool.qualifiedName}...`);
+
+            const result = await mcpDevExecutor.execute(statusTool.qualifiedName, {});
+
+            console.log("\n[MCP SMOKE TEST] System status result:");
+            console.dir(result, { depth: null });
+
+            console.log(
+                result.ok
+                    ? "\n[MCP SMOKE TEST] SYSTEM STATUS SUCCESS"
+                    : "\n[MCP SMOKE TEST] SYSTEM STATUS FAILED",
+            );
+        } else {
+            console.error("[MCP SMOKE TEST] system.get_status was not discovered.");
+        }
+
+        // Test 2: Screenshot
+        if (screenshotTool && [...deviceRoles.values()].includes(DeviceRole.HEART)) {
+            console.log(`\n[MCP SMOKE TEST] Calling ${screenshotTool.qualifiedName}...`);
+
+            const result = await mcpDevExecutor.execute(
+                screenshotTool.qualifiedName,
+                { interactive: true },
+            );
+            console.log("[MCP DEBUG] Result keys:", Object.keys(result));
+
+            console.log("\n[MCP SMOKE TEST] Screenshot result:");
+
+            if (result.ok) {
+                console.log("  Screenshot tool executed successfully.");
+                console.dir(result.output, { depth: 2 });
+            } else {
+                 console.error("[MCP SMOKE TEST] Screenshot execution failed:");
+                 console.dir(result, { depth: null });
+            }
+        } else if (!screenshotTool) {
+            console.error("[MCP SMOKE TEST] screen.get_screenshot was not discovered.");
+        } else {
+            console.log("[MCP SMOKE TEST] Screenshot skipped: Heart is needed to announce capture.");
+        }
+    } catch (error) {
+        console.error("[MCP SMOKE TEST] Error:", error);
+    }
+}
+
 export const wss = new WebSocketServer({
     server: httpServer,
     path: "/ws",
@@ -260,6 +509,7 @@ export const wss = new WebSocketServer({
 
 wss.on("connection", (ws) => {
     let deviceId: string | undefined;
+    let generation = 0;
     // Created per socket, before the handshake: even a rejection ACK counts on this connection.
     const outboundSeq = new SequenceCounter();
 
@@ -334,6 +584,11 @@ wss.on("connection", (ws) => {
 
         const envelope = brainData.data;
 
+        if (deviceId && (devices.get(deviceId) !== ws || deviceGenerations.get(deviceId) !== generation)) {
+            console.log(`[SERVER] Ignoring message from stale connection device=${deviceId}`);
+            return;
+        }
+
         // ENVELOPE.md §6: "Past it, the receiver rejects with reason `expired` and logs it."
         // Dropping it silently left the sender waiting for an ACK that was never coming, which
         // reads as a timeout rather than as the refusal it actually is.
@@ -370,6 +625,15 @@ wss.on("connection", (ws) => {
             }
 
             const hello = envelope.payload as HelloPayload;
+            if (!Object.values(DeviceRole).includes(hello.role)) {
+                ws.send(encode(createWelcomeAck(envelope, {
+                    accepted: false,
+                    reason: "invalid device role",
+                    seq: outboundSeq,
+                })));
+                ws.close();
+                return;
+            }
             if (hello.token !== config.devToken) {
                 const badWelcome = createWelcomeAck(envelope, {
                     accepted: false,
@@ -382,10 +646,27 @@ wss.on("connection", (ws) => {
                 return;
             }
 
+            if (hello.role === DeviceRole.GANGLION && !config.mcpAllowedGanglionDeviceIds.includes(hello.device_id)) {
+                ws.send(encode(createWelcomeAck(envelope, {
+                    accepted: false,
+                    reason: "Ganglion device is not allowlisted",
+                    seq: outboundSeq,
+                })));
+                ws.close();
+                return;
+            }
+
             deviceId = hello.device_id;
+            generation = (deviceGenerations.get(deviceId) ?? 0) + 1;
+            const previousSocket = devices.get(deviceId);
+            resetSequence(deviceId);
+            if (previousSocket && previousSocket !== ws) {
+                previousSocket.close();
+            }
             devices.set(deviceId, ws);
             deviceSeq.set(deviceId, outboundSeq);
             deviceRoles.set(deviceId, hello.role);
+            deviceGenerations.set(deviceId, generation);
             if (!deviceCommands.has(deviceId)) {
                 deviceCommands.set(deviceId, new Map());
             }
@@ -395,6 +676,36 @@ wss.on("connection", (ws) => {
             ws.send(encode(welcome));
             console.log(`[SERVER] welcome Ack Sent`);
             startHeartbeat();
+if (hello.role === DeviceRole.GANGLION) {
+    if (!deviceId) {
+        console.error("[SERVER] Cannot attach MCP: missing device ID");
+        return;
+    }
+
+    // Capture the validated ID for asynchronous callbacks.
+    const authenticatedDeviceId: string = deviceId;
+
+    const peer: MCPAuthenticatedPeer = {
+        deviceId: authenticatedDeviceId,
+        socket: ws,
+        generation,
+    };
+
+    void mcpConnectionManager.attach(peer)
+        .then(async () => {
+            console.log(`[SERVER] MCP ready device=${authenticatedDeviceId}`);
+            await runMcpSmokeTest(authenticatedDeviceId);
+        })
+        .catch((error: unknown) => {
+            console.log(
+                `[SERVER] MCP attach failed device=${authenticatedDeviceId} reason=${
+                    error instanceof Error ? error.message : "unknown"
+                }`,
+            );
+        });
+}
+
+// Keep the SYNAPSE manifest replay logic here, outside the GANGLION block.
 
             // An app that has just connected should not stare at a blank screen until the next
             // publish tick, so replay what we already know.
@@ -413,12 +724,28 @@ wss.on("connection", (ws) => {
             return;
         }
 
+        if (devices.get(deviceId) !== ws || deviceGenerations.get(deviceId) !== generation) {
+            console.log(`[SERVER] Ignoring message from stale connection device=${deviceId}`);
+            return;
+        }
+
         if (!checkSequence(deviceId, envelope.seq, envelope.kind)) {
             return;
         }
 
         if (envelope.kind === Kind.ACK) {
-            handleAck(envelope);
+            handleAck(envelope, { deviceId, socket: ws });
+        }
+        if (envelope.kind === Kind.EVT &&
+            (envelope.topic === Topics.MCP_RESPONSE || envelope.topic === Topics.MCP_NOTIFICATION)) {
+            if (deviceRoles.get(deviceId) === DeviceRole.GANGLION) {
+                mcpConnectionManager.handleEnvelope({ deviceId, socket: ws, generation }, envelope);
+            }
+        }
+        if (envelope.kind === Kind.CMD && envelope.topic === Topics.MCP_REQUEST) {
+            if (deviceRoles.get(deviceId) === DeviceRole.GANGLION) {
+                mcpConnectionManager.rejectServerRequest({ deviceId, socket: ws, generation }, envelope, outboundSeq.next());
+            }
         }
         if (envelope.kind === Kind.EVT && envelope.topic === Topics.SYS_HEARTBEAT) {
             // Liveness is recorded, not answered. The outbound beat is on its own timer.
@@ -449,10 +776,15 @@ wss.on("connection", (ws) => {
     ws.on("close", () => {
         stopHeartbeat();
         if (deviceId) {
-            resetSequence(deviceId);
-            devices.delete(deviceId);
-            deviceSeq.delete(deviceId);
-            deviceRoles.delete(deviceId);
+            const isCurrent = devices.get(deviceId) === ws && deviceGenerations.get(deviceId) === generation;
+            if (isCurrent) {
+                resetSequence(deviceId);
+                devices.delete(deviceId);
+                deviceSeq.delete(deviceId);
+                deviceRoles.delete(deviceId);
+                deviceGenerations.delete(deviceId);
+                void mcpConnectionManager.detach({ deviceId, socket: ws, generation });
+            }
             // The manifest is deliberately kept: an app must be able to show last-known state
             // with a staleness marker when the robot is off (TASKS.md S1.2, third row).
             console.log(`[SERVER] Device disconnected: ${deviceId}`);

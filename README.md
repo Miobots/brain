@@ -15,10 +15,79 @@ bun run typecheck
 |---|---|
 | `ws://…/ws` | The hub. Heart, Synapse and Ganglion dial in and authenticate with `sys.hello` |
 | `POST /dev/speak` | `{"text", "lang"}` → `voice.speak` straight to the robot, no LLM |
-| `POST /dev/utterance` | `{"text"}` → the ReAct agent loop, which may call tools such as `speak` |
+| `POST /dev/utterance` | `{"text"}` → the Brain Tools ReAct loop, which may call native Brain tools such as `speak` |
+| `POST /dev/mcp-agent` | Bearer token and `{"instruction"}` → the independent MCP Agent loop, which may call tools from connected MCP servers |
 | `GET /health` | Connected devices |
 
-The `/dev/*` endpoints carry no token, which is why the hub binds to `127.0.0.1` by default. Set
+### MCP transport
+
+Allow MCP sessions only for explicitly approved Ganglion device IDs with
+`MCP_ALLOWED_GANGLION_DEVICE_IDS=ganglion-laptop-01,ganglion-laptop-02`. An empty or missing
+allowlist rejects Ganglion at authentication.
+MCP uses the existing authenticated WebSocket and does not open another listener.
+
+The current development handshake uses a shared `DEV_TOKEN`; it authenticates possession of the
+shared token but does not provide cryptographic per-device identity binding. The MCP allowlist is an
+additional server-side authorization check, not a replacement for stronger device credentials.
+
+### MCP Agent dev chat
+
+The MCP Agent has its own conversation and execution loop, separate from the Brain Tools Agent.
+It discovers tools from authenticated MCP connections, asks the configured model to select tools,
+and executes calls through Brain's permission- and schema-validating MCP executor. The development
+endpoint is read-only by default. To enable filesystem actions, set
+`MCP_DEV_ALLOW_FILESYSTEM_ACTIONS=true` in both Brain and Ganglion environments with
+`NODE_ENV=development`, then restart both
+processes. Brain only permits tools named `filesystem.*`; Ganglion still confines them to the
+configured approved directories. Deletion requires `confirmed: true`, and recursive deletion also
+requires `recursive: true`. MCP tool calls, results, errors, and progress are logged by the Brain
+server; prompt and tool-result contents are not logged.
+
+Set a private `MCP_DEV_HTTP_TOKEN` in Brain's `.env` and in the shell running `mcp-chat`. The
+endpoint returns 503 until a token is configured and 401 when the bearer token is missing or wrong.
+The MCP Agent is capped at five model iterations. A screenshot is announced through Heart before
+capture; if Heart cannot speak, capture is refused.
+
+Run Brain, Ganglion, and the interactive client in separate terminals:
+
+```bash
+# Terminal 1, in brain/: the hub and MCP Agent endpoint
+bun start
+
+# Terminal 2, in ganglion/: connect the allowlisted MCP server to Brain
+bun start
+
+# Terminal 3, in brain/: interactive MCP Agent client
+bun run mcp-chat
+```
+
+Enter a request such as `Check my system status.` Type `:quit` to exit. The client connects to
+`POST /dev/mcp-agent` in the Brain server process, so Brain must be running and Ganglion must be
+connected and included in `MCP_ALLOWED_GANGLION_DEVICE_IDS`.
+
+The client defaults to model role `fast` and discovers tools on all connected MCP servers. Options:
+
+```bash
+bun run mcp-chat -- --server ganglion-laptop-01 --model-role fast --max-iterations 3
+```
+
+Supported model roles are `fast`, `vision`, `reasoning`, and `orchestrator`. Configure the matching
+`AI_<ROLE>_PROVIDER` and `AI_<ROLE>_MODEL` bindings and provider credentials in `.env`. The agent
+switches to the configured `vision` capability after it receives an image result. For example,
+the `vision` model must accept image input to answer screenshot questions.
+
+### MCP tool execution
+
+The persistent MCP connection manager owns authenticated sessions and discovery. Phase 5 adds a
+separate registry and executor: discovered metadata is namespaced per server, arguments are validated
+before execution, and Brain-side permission policy is checked before routing through the manager's
+session. The MCP Agent exposes only registered tool schemas to the model and invokes the existing
+executor; it does not duplicate MCP connections or execution. Unknown tools, unavailable servers,
+malformed schemas, invalid arguments, and unknown permission classes fail closed. Tool results are
+normalized into the conversation, including image attachments passed through the shared AI
+attachment pipeline.
+
+Most `/dev/*` endpoints carry no token, which is why the hub binds to `127.0.0.1` by default. Set
 `HOST=0.0.0.0` only deliberately — for example, so a phone on the same Wi-Fi can reach it.
 
 To try it against the canonical Fake Heart, run `bun run sim` in `../miobots-protocol` alongside,

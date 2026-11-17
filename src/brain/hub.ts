@@ -9,6 +9,7 @@ import {
     type Envelope,
 } from "@miobots/protocol";
 import { devices, deviceSeq } from "./devices.ts";
+import type { WebSocket } from "ws";
 import { randomUUID } from "node:crypto";
 import { config } from "./config.ts";
 import {
@@ -22,7 +23,22 @@ type PendingCommand = {
     resolve: (ack: Envelope<string, unknown>) => void;
     reject: (error: Error) => void;
     timeout: ReturnType<typeof setTimeout>;
+    connection: WebSocket;
+    rejectOnNack: boolean;
 };
+
+export interface CommandHandle {
+    correlationId: string;
+    ack: Promise<Envelope<string, unknown>>;
+    deviceId: string;
+    socket: WebSocket;
+    cancel: (reason?: string) => void;
+}
+
+export interface CommandOptions {
+    beforeSend?: (correlationId: string) => void;
+    rejectOnNack?: boolean;
+}
 
 const pendingCommands = new Map<string, PendingCommand>();
 
@@ -129,6 +145,7 @@ export function handleHeartBeat(
 
 export function handleAck(
     ack: Envelope<string, unknown>,
+    sender?: { deviceId: string; socket: WebSocket },
 ): void {
 
     const corr_id = ack.corr_id;
@@ -151,6 +168,11 @@ export function handleAck(
         return;
     }
 
+    if (sender && (pending.device_id !== sender.deviceId || pending.connection !== sender.socket)) {
+        console.log(`[HUB] Ignoring ACK from unexpected connection corr_id=${corr_id}`);
+        return;
+    }
+
     const map = deviceCommands.get(pending.device_id);
 
     if (map) {
@@ -165,7 +187,11 @@ export function handleAck(
     clearTimeout(pending.timeout);
     pendingCommands.delete(corr_id);
 
-    pending.resolve(ack);
+    if (pending.rejectOnNack && isRejectedAck(ack)) {
+        pending.reject(new Error(`[HUB] Command rejected: ${ack.payload.reason ?? "rejected"}`));
+    } else {
+        pending.resolve(ack);
+    }
 }
 
 export function sendCommand<T extends string = string, P = unknown>(
@@ -175,14 +201,21 @@ export function sendCommand<T extends string = string, P = unknown>(
     idem_key?: string,
     expires_at?: number,
 ): Promise<Envelope<string, unknown>> {
+    return sendCommandHandle(device_id, topic, payload, idem_key, expires_at).ack;
+}
+
+export function sendCommandHandle<T extends string = string, P = unknown>(
+    device_id: string,
+    topic: T,
+    payload: P,
+    idem_key?: string,
+    expires_at?: number,
+    options?: CommandOptions,
+): CommandHandle {
     const connection = devices.get(device_id);
 
     if (!connection) {
-        return Promise.reject(
-            new Error(
-                `[HUB] Device ${device_id} is not connected`
-            )
-        );
+        return rejectedCommandHandle(new Error(`[HUB] Device ${device_id} is not connected`), device_id);
     }
 
     let map = deviceCommands.get(device_id);
@@ -195,7 +228,13 @@ export function sendCommand<T extends string = string, P = unknown>(
         const existing = getExistingCommand(map, idem_key);
 
         if (existing) {
-            return existing;
+            return {
+                correlationId: idem_key ? map.get(idem_key)?.corr_id ?? "" : "",
+                ack: existing,
+                deviceId: device_id,
+                socket: connection,
+                cancel: () => undefined,
+            };
         }
     }
 
@@ -212,11 +251,7 @@ export function sendCommand<T extends string = string, P = unknown>(
     // This device's own outbound counter — never a shared one (ENVELOPE.md §6).
     const outboundSeq = deviceSeq.get(device_id);
     if (!outboundSeq) {
-        return Promise.reject(
-            new Error(
-                `[HUB] No outbound sequence counter for ${device_id} — not handshaked`
-            )
-        );
+        return rejectedCommandHandle(new Error(`[HUB] No outbound sequence counter for ${device_id} — not handshaked`), device_id);
     }
 
     const env = newEnvelope({
@@ -259,6 +294,8 @@ export function sendCommand<T extends string = string, P = unknown>(
                 resolve,
                 reject,
                 timeout,
+                connection,
+                rejectOnNack: options?.rejectOnNack ?? false,
             });
         }
     );
@@ -274,7 +311,41 @@ export function sendCommand<T extends string = string, P = unknown>(
 
     map.set(commandIdemKey, commandRecord);
 
+    options?.beforeSend?.(corr_id);
+
     connection.send(encode(env));
 
-    return ackPromise;
+    return {
+        correlationId: corr_id,
+        ack: ackPromise,
+        deviceId: device_id,
+        socket: connection,
+        cancel: (reason = "Command cancelled") => cancelPendingCommand(corr_id, reason),
+    };
+}
+
+function rejectedCommandHandle(error: Error, deviceId: string): CommandHandle {
+    return {
+        correlationId: "",
+        ack: Promise.reject(error),
+        deviceId,
+        socket: undefined as never,
+        cancel: () => undefined,
+    };
+}
+
+function cancelPendingCommand(correlationId: string, reason: string): void {
+    const pending = pendingCommands.get(correlationId);
+    if (!pending) return;
+    clearTimeout(pending.timeout);
+    pendingCommands.delete(correlationId);
+    const map = deviceCommands.get(pending.device_id);
+    const command = map?.get(pending.idem_key);
+    if (command) command.status = "timeout";
+    pending.reject(new Error(reason));
+}
+
+function isRejectedAck(ack: Envelope<string, unknown>): ack is Envelope<string, { accepted: false; reason?: string }> {
+    return typeof ack.payload === "object" && ack.payload !== null &&
+        "accepted" in ack.payload && ack.payload.accepted === false;
 }
