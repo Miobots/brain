@@ -10,13 +10,16 @@ import {
     newEnvelope,
     SequenceCounter,
 } from "@miobots/protocol";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pairDevice } from "../../../src/brain/pairing.ts";
 import { config } from "../../../src/brain/config.ts";
 import { devices, deviceRoles } from "../../../src/brain/devices.ts";
 import { speakTool } from "../../../src/brain/tools.ts";
 
 process.env.PORT = "45879";
 process.env.DEV_TOKEN = "routing-test-token";
-process.env.MCP_ALLOWED_GANGLION_DEVICE_IDS = "ganglion-second,ganglion-first,only-ganglion,explicit-ganglion,spoofed-ganglion,route-ganglion";
 
 let serverModule: typeof import("../../../src/brain/server.ts");
 const clients: WebSocket[] = [];
@@ -88,6 +91,11 @@ async function speakAndAck(client: WebSocket, seq: SequenceCounter): Promise<voi
 describe("authenticated Heart device routing", () => {
     beforeAll(async () => {
         serverModule = await import("../../../src/brain/server.ts");
+        // The test server is shared across files, so pair with the token it is actually running with.
+        process.env.PAIRED_GANGLIONS_FILE = join(mkdtempSync(join(tmpdir(), "brain-pair-")), "paired.json");
+        for (const id of ["ganglion-second", "ganglion-first", "only-ganglion", "explicit-ganglion", "spoofed-ganglion", "route-ganglion"]) {
+            pairDevice(id, id, config.devToken);
+        }
         await new Promise((resolve) => setTimeout(resolve, 30));
     });
 

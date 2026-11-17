@@ -41,3 +41,6 @@ temp/
 .cache/
 .eslintcache
 .env
+
+# Paired laptop tokens (hashes only, still private)
+data/

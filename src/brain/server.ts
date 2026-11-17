@@ -14,6 +14,8 @@ import {
     DeviceRole,
     HeartCapabilities,
     isNavGotoPayload,
+    isPairConfirmPayload,
+    isPairPayload,
     newEnvelope,
     type AckPayload,
     type HelloPayload,
@@ -29,6 +31,7 @@ import { deviceGenerations } from "./devices.ts";
 import { mcpConnectionManager } from "../agents/mcp-agent/manager.ts";
 import type { MCPAuthenticatedPeer } from "../agents/mcp-agent/types.ts";
 import { brainManifest } from "./capabilities.ts";
+import { cancelPairing, confirmPairing, isPairedToken, requestPairing } from "./pairing.ts";
 import { describeSituation, recordBattery, robotSituations } from "./context.ts";
 import {
     handleNavigationFeedback,
@@ -524,6 +527,8 @@ export const wss = new WebSocketServer({
 wss.on("connection", (ws) => {
     let deviceId: string | undefined;
     let generation = 0;
+    /** Set while this socket is an unpaired laptop waiting for its code to be typed. */
+    let waitingPairCode: string | undefined;
     // Created per socket, before the handshake: even a rejection ACK counts on this connection.
     const outboundSeq = new SequenceCounter();
 
@@ -622,6 +627,31 @@ wss.on("connection", (ws) => {
             return;
         }
 
+        if (envelope.kind === Kind.CMD && envelope.topic === Topics.SYS_PAIR) {
+            // Only an unauthenticated socket may ask to be paired, and only once.
+            if (deviceId || waitingPairCode) return;
+            const request = envelope.payload;
+            const answer = (ack: AckPayload) => {
+                if (ws.readyState === WebSocket.OPEN) ws.send(encode(createAck(envelope, ack, outboundSeq)));
+                ws.close();
+            };
+            if (!isPairPayload(request) || request.protocol_version !== ProtocolDefaults.PROTOCOL_VERSION) {
+                answer({ accepted: false, reason: "Invalid pairing request." });
+                return;
+            }
+            const refusal = requestPairing(request.code, {
+                deviceId: request.device_id,
+                name: request.name,
+                complete: (ack) => {
+                    waitingPairCode = undefined;
+                    answer(ack);
+                },
+            });
+            if (refusal) answer(refusal);
+            else waitingPairCode = request.code;
+            return;
+        }
+
         if (envelope.topic === Topics.SYS_HELLO) {
             const validation = validateHello(envelope.payload);
             if (!validation.valid) {
@@ -648,7 +678,11 @@ wss.on("connection", (ws) => {
                 ws.close();
                 return;
             }
-            if (hello.token !== config.devToken) {
+            // A laptop is admitted by its own paired token, never by the shared dev token (G0.2).
+            const tokenAccepted = hello.role === DeviceRole.GANGLION
+                ? isPairedToken(hello.device_id, hello.token)
+                : hello.token === config.devToken;
+            if (!tokenAccepted) {
                 const badWelcome = createWelcomeAck(envelope, {
                     accepted: false,
                     reason: "Unauthenticated token",
@@ -656,16 +690,6 @@ wss.on("connection", (ws) => {
                 });
                 ws.send(encode(badWelcome));
                 console.log(`[SERVER] BAD DEV_TOKEN closing client`);
-                ws.close();
-                return;
-            }
-
-            if (hello.role === DeviceRole.GANGLION && !config.mcpAllowedGanglionDeviceIds.includes(hello.device_id)) {
-                ws.send(encode(createWelcomeAck(envelope, {
-                    accepted: false,
-                    reason: "Ganglion device is not allowlisted",
-                    seq: outboundSeq,
-                })));
                 ws.close();
                 return;
             }
@@ -781,6 +805,12 @@ if (hello.role === DeviceRole.GANGLION) {
             latestManifests.set(deviceId, manifest);
             relayManifestToApps(manifest);
         }
+        if (deviceRoles.get(deviceId) === DeviceRole.SYNAPSE && envelope.kind === Kind.CMD && envelope.topic === Topics.SYS_PAIR_CONFIRM) {
+            const response: AckPayload = isPairConfirmPayload(envelope.payload)
+                ? confirmPairing(envelope.payload.code)
+                : { accepted: false, reason: "A pairing code is six digits." };
+            ws.send(encode(createAck(envelope, response, outboundSeq)));
+        }
         if (deviceRoles.get(deviceId) === DeviceRole.SYNAPSE && envelope.kind === Kind.CMD && envelope.topic === Topics.NAV_GOTO) {
             void (async () => {
                 let response: AckPayload;
@@ -824,6 +854,7 @@ if (hello.role === DeviceRole.GANGLION) {
 
     ws.on("close", () => {
         stopHeartbeat();
+        if (waitingPairCode) cancelPairing(waitingPairCode);
         if (deviceId) {
             const isCurrent = devices.get(deviceId) === ws && deviceGenerations.get(deviceId) === generation;
             if (isCurrent) {
