@@ -54,7 +54,8 @@ export const speakTool: ToolDefinition = {
     required: ["text"],
   },
   execute: async (args: Record<string, unknown>) => {
-    const text = typeof args.text === "string" ? args.text.trim() : "";
+    // Speech engines read markdown aloud, and models like bold numbers.
+    const text = typeof args.text === "string" ? args.text.replace(/[*_`#]/g, "").trim() : "";
     if (!text) {
       throw new Error("Missing or empty 'text' argument for speak tool");
     }
@@ -148,6 +149,8 @@ export const cancelNavigationTool: ToolDefinition = {
 };
 
 export const LAPTOP_UNREACHABLE = "I can't reach your laptop right now.";
+export const APPROVAL_REJECTED = "That was rejected on your phone, so I didn't do it.";
+export const APPROVAL_UNANSWERED = "Nobody approved that on your phone in time, so I haven't done it. It's waiting in the app; approve it there and I'll do it then.";
 
 export interface AskLaptopDependencies {
   isConnected: () => boolean;
@@ -177,6 +180,11 @@ export function createAskLaptopTool(deps: AskLaptopDependencies): ToolDefinition
       if (!deps.isConnected()) return { status: "unavailable", message: LAPTOP_UNREACHABLE };
       try {
         const result = await deps.run(task);
+        // Said word for word, never paraphrased: a model asked to "let me know if you'd like me to go
+        // ahead" would be inviting a spoken approval, which can never count (BRAIN_DECISIONS 27).
+        const codes = result.errors.map((error) => error.code);
+        if (codes.includes("approval_rejected")) return { status: "not_approved", message: APPROVAL_REJECTED };
+        if (codes.includes("approval_required")) return { status: "not_approved", message: APPROVAL_UNANSWERED };
         const text = result.output
           .flatMap((block) => (block.type === "text" ? [block.text] : []))
           .join("\n")
