@@ -127,7 +127,8 @@ describe("MCP Phase 5 tool registry and executor", () => {
         await expect(provider.authorize({ tool: read, arguments: {} })).resolves.toMatchObject({ allowed: true });
         await expect(provider.authorize({ tool: write, arguments: {} })).resolves.toMatchObject({ allowed: false, code: "permission_denied" });
 
-        const enabled = createMCPDevPermissionProvider(true);
+        expect(() => createMCPDevPermissionProvider(true, "production")).toThrow(/NODE_ENV=development/);
+        const enabled = createMCPDevPermissionProvider(true, "development");
         await expect(enabled.authorize({ tool: write, arguments: {} })).resolves.toMatchObject({ allowed: true });
         await expect(enabled.authorize({ tool: unrelated, arguments: {} })).resolves.toMatchObject({ allowed: false });
         const deletion = registry.register({ ...tool("ganglion-dev-01", "filesystem.delete", "action"), originalName: "filesystem.delete" })[0]!;

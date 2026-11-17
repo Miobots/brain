@@ -1,6 +1,9 @@
 import type { MCPToolPermissionProvider } from "./tool-executor.ts";
 
-export function createMCPDevPermissionProvider(allowFilesystemActions: boolean): MCPToolPermissionProvider {
+export function createMCPDevPermissionProvider(allowFilesystemActions: boolean, nodeEnv = process.env.NODE_ENV): MCPToolPermissionProvider {
+  if (allowFilesystemActions && nodeEnv !== "development") {
+    throw new Error("MCP filesystem action auto-approval requires NODE_ENV=development");
+  }
   return {
     authorize: async ({ tool, arguments: args }) => {
       if (tool.permission === "read") return { allowed: true };
