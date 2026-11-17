@@ -17,6 +17,7 @@
 9. **Ganglion Behind One Tool:** The main agent reaches Ganglion only through `ask_laptop`, which delegates to the separate MCP agent (`src/agents/mcp-agent/`). Ganglion's tools never enter the main tool list. No daemon connected → return "I can't reach your laptop right now", never throw (BRAIN_DECISIONS 26).
 10. **Laptops Pair, Never Share:** A Ganglion is admitted only by its own paired token (`sys.pair` → code typed in the app → `sys.pair_confirm`); Brain stores token hashes only. The shared dev token never admits role `ganglion` (GANGLION_DECISIONS 29).
 11. **A Tap, Never a Voice:** Laptop Action tools wait for an ACK to `sys.approval` from an app connection and then carry an approval ticket (`_meta`, exact-argument hash, 30 s, single use). No tool approves; voice only announces; unanswered requests go to the inbox (BRAIN_DECISIONS 27).
+12. **Pushes Say Only "Waiting":** Approval pushes (Expo, online-only) carry no tool name or arguments; the details and the Approve button stay in the app. No internet means no push and nothing else changes (BRAIN_DECISIONS 28).
 
 ---
 
