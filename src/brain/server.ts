@@ -35,6 +35,7 @@ import { MCPToolRegistry } from "../agents/mcp-agent/tool-registry.ts";
 import { MCPToolExecutor } from "../agents/mcp-agent/tool-executor.ts";
 import { createMCPDevPermissionProvider } from "../agents/mcp-agent/dev-permission-provider.ts";
 import { MCPAgentRunner } from "../agents/mcp-agent/agent.ts";
+import { discoverMCPTools } from "../agents/mcp-agent/tools.ts";
 import type { MCPCallOptions, MCPModelRole } from "../agents/mcp-agent/types.ts";
 import { speakTool } from "./tools.ts";
 
@@ -438,7 +439,7 @@ async function runMcpSmokeTest(deviceId: string): Promise<void> {
 
     mcpSmokeTestStarted = true;
 
-    const discoveredTools = mcpConnectionManager.getAvailableTools(deviceId);
+    const discoveredTools = discoverMCPTools(mcpDevRegistry, mcpConnectionManager, [deviceId]);
 
     console.log("\n[MCP SMOKE TEST] Discovered tools:");
     for (const tool of discoveredTools) {
@@ -473,7 +474,7 @@ async function runMcpSmokeTest(deviceId: string): Promise<void> {
         }
 
         // Test 2: Screenshot
-        if (screenshotTool) {
+        if (screenshotTool && [...deviceRoles.values()].includes(DeviceRole.HEART)) {
             console.log(`\n[MCP SMOKE TEST] Calling ${screenshotTool.qualifiedName}...`);
 
             const result = await mcpDevExecutor.execute(
@@ -491,8 +492,10 @@ async function runMcpSmokeTest(deviceId: string): Promise<void> {
                  console.error("[MCP SMOKE TEST] Screenshot execution failed:");
                  console.dir(result, { depth: null });
             }
-        } else {
+        } else if (!screenshotTool) {
             console.error("[MCP SMOKE TEST] screen.get_screenshot was not discovered.");
+        } else {
+            console.log("[MCP SMOKE TEST] Screenshot skipped: Heart is needed to announce capture.");
         }
     } catch (error) {
         console.error("[MCP SMOKE TEST] Error:", error);
