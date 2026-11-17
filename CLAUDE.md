@@ -104,6 +104,12 @@ vectors. Vectors need embeddings, which needs an open decision nobody has inform
 The lexical version failing on a real query set is also the *baseline* that makes the eventual
 upgrade a measured before-and-after rather than one unanchored number.
 
+**Every picture the robot keeps is labelled by a Brain worker, and raw pictures live seven days**
+(BRAIN_DECISIONS 25). The worker is a loop over unprocessed capture rows — **no job queue** —
+running off the request path through the `vision` capability. It stores vectors, but **nothing
+searches them until `B7.4`**; search stays trigram. After seven days the picture and its scene
+vector are deleted. An object row is never deleted by age.
+
 ## Current state
 
 See the vault's `STATUS.md` for the project's state; this covers only what is true inside this repo.

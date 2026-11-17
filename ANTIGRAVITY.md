@@ -13,6 +13,7 @@
 5. **Code-Enforced Grounding Floor:** If memory retrieval returns 0 rows, the LLM is **never called**; return deterministic "no record" string.
 6. **72-Hour Reminder Window:** Brain expands recurrence rules into concrete occurrences and pushes `sched.window` to Heart.
 7. **Permission Tiers & Audit:** `Action`-tier tools block on Synapse mobile approval; executed actions append to SHA-256 hash-chained `audit` table.
+8. **Capture Worker & Seven-Day Window:** Every picture the robot keeps is labelled by a loop over unprocessed capture rows — no job queue, off the request path, through the `vision` capability. Vectors are stored but not searched until `B7.4`; search stays trigram. After 7 days the picture and its scene vector are deleted; an object row is never deleted by age (BRAIN_DECISIONS 25).
 
 ---
 
