@@ -329,7 +329,8 @@ tools.push({
     const knownTool = this.toolCache?.find((tool) => tool.qualifiedName === call.toolName || tool.name === call.toolName);
     const toolName = knownTool?.originalName ?? call.toolName;
     if (!toolName || toolName.includes("__")) return { ok: false, output: [], isError: true, error: { code: "invalid_tool_name", message: "Tool name is not valid for this MCP server" } };
-    const response = await this.transport.request("tools/call", { name: toolName, arguments: call.arguments }, options);
+    const params = { name: toolName, arguments: call.arguments, ...(call.meta ? { _meta: call.meta } : {}) };
+    const response = await this.transport.request("tools/call", params, options);
     if (!("result" in response)) return { ok: false, output: [], isError: true, error: { code: "mcp_error", message: response.error.message } };
     const result = response.result;
     if (typeof result !== "object" || result === null) return { ok: false, output: [], isError: true, error: { code: "malformed_result", message: "MCP tool result was not an object" } };

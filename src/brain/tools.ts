@@ -13,7 +13,7 @@ import { MCPAgentRunner } from "../agents/mcp-agent/agent.ts";
 import { mcpConnectionManager } from "../agents/mcp-agent/manager.ts";
 import { MCPToolRegistry } from "../agents/mcp-agent/tool-registry.ts";
 import { MCPToolExecutor } from "../agents/mcp-agent/tool-executor.ts";
-import { createMCPDevPermissionProvider } from "../agents/mcp-agent/dev-permission-provider.ts";
+import { createApprovalPermissionProvider, setInboxRunner } from "./approvals.ts";
 import type { MCPAgentResult } from "../agents/mcp-agent/types.ts";
 
 /**
@@ -191,16 +191,18 @@ export function createAskLaptopTool(deps: AskLaptopDependencies): ToolDefinition
   };
 }
 
-// Its own executor, always read-only: the dev endpoint's filesystem auto-approval must never be
-// reachable by voice. Action-tier tools wait for G2.3's approval surface.
+// Its own executor: the dev endpoint's auto-approval must never be reachable by voice. Read tools
+// run; Action tools wait for a tap on the phone, and the robot only announces (BRAIN_DECISIONS 27).
+const sayAloud = async (text: string) => { await speakTool.execute!({ text }); };
 const laptopRegistry = new MCPToolRegistry(mcpConnectionManager);
-const laptopAgent = new MCPAgentRunner({
-  registry: laptopRegistry,
-  manager: mcpConnectionManager,
-  executor: new MCPToolExecutor(laptopRegistry, mcpConnectionManager, {
-    permissionProvider: createMCPDevPermissionProvider(false),
-    announceScreenCapture: async () => { await speakTool.execute!({ text: "Taking a look at your screen" }); },
-  }),
+const laptopExecutor = new MCPToolExecutor(laptopRegistry, mcpConnectionManager, {
+  permissionProvider: createApprovalPermissionProvider({ announce: sayAloud }),
+  announceScreenCapture: () => sayAloud("Taking a look at your screen"),
+});
+const laptopAgent = new MCPAgentRunner({ registry: laptopRegistry, manager: mcpConnectionManager, executor: laptopExecutor });
+setInboxRunner(async (qualifiedName, args) => {
+  const result = await laptopExecutor.execute(qualifiedName, args);
+  return result.ok ? "Done, that laptop request you approved has run." : `That laptop request failed: ${result.error?.message ?? "unknown error"}`;
 });
 
 export const askLaptopTool = createAskLaptopTool({

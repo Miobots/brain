@@ -38,6 +38,8 @@ export interface CommandHandle {
 export interface CommandOptions {
     beforeSend?: (correlationId: string) => void;
     rejectOnNack?: boolean;
+    /** How long to wait for the ACK. `sys.approval` waits for a human, so it uses DEFAULT_APPROVAL_TIMEOUT_MS. */
+    timeoutMs?: number;
 }
 
 const pendingCommands = new Map<string, PendingCommand>();
@@ -265,6 +267,7 @@ export function sendCommandHandle<T extends string = string, P = unknown>(
         expires_at: commandExpiresAt,
     });
 
+    const timeoutMs = options?.timeoutMs ?? config.timeout_ms;
     const ackPromise = new Promise<Envelope<string, unknown>>(
         (resolve, reject) => {
             const timeout = setTimeout(() => {
@@ -283,10 +286,10 @@ export function sendCommandHandle<T extends string = string, P = unknown>(
                 reject(
                     new Error(
                         `[HUB] Command timed out after ` +
-                        `${config.timeout_ms}ms: corr_id=${corr_id}`
+                        `${timeoutMs}ms: corr_id=${corr_id}`
                     )
                 );
-            }, config.timeout_ms);
+            }, timeoutMs);
 
             pendingCommands.set(corr_id, {
                 device_id,
