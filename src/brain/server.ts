@@ -23,7 +23,7 @@ import { config } from "./config.ts";
 import { createHeartbeat, handleAck, handleHeartBeat, sendCommand } from "./hub.ts";
 import { deviceCommands } from "./command-store.ts";
 import { resetSequence, checkSequence } from "./sequence-tracker.ts";
-import { runAgentLoop } from "./agent.ts";
+import { runAgentLoop, speakUnspokenReply } from "./agent.ts";
 import { devices, deviceRoles, deviceSeq, resolveHeartDeviceId } from "./devices.ts";
 import { deviceGenerations } from "./devices.ts";
 import { mcpConnectionManager } from "../agents/mcp-agent/manager.ts";
@@ -340,6 +340,7 @@ export const httpServer = http.createServer((req, res) => {
                     sessionId,
                     userId,
                 });
+                await speakUnspokenReply(response, async (args) => { await speakTool.execute!({ ...args, device_id: targetDeviceId }); });
 
                 const isTimeout = response.error?.includes("timed out") ?? false;
                 res.writeHead(response.ok ? 200 : isTimeout ? 504 : 500);

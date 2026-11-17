@@ -194,3 +194,25 @@ function isUserFacingError(error: unknown): error is Error & { userMessage: stri
     && "userMessage" in error
     && typeof error.userMessage === "string";
 }
+
+/**
+ * Every utterance gets a spoken answer. If the model replied in text without calling `speak`, the
+ * Brain speaks that text itself, so whether the robot talks never depends on the model remembering
+ * to. Best effort: a Heart that cannot speak does not turn an answered request into a failure.
+ */
+export async function speakUnspokenReply(
+  response: AgentResponse,
+  speak: (args: Record<string, unknown>) => Promise<unknown>,
+): Promise<boolean> {
+  if (!response.ok || response.toolCalls.some((call) => call.name === "speak")) return false;
+  // TTS reads markdown literally; the model likes bold numbers.
+  const text = response.text.replace(/[*_`#]/g, "").trim();
+  if (!text) return false;
+  try {
+    await speak({ text, lang: /[\u0600-\u06FF]/.test(text) ? "ur" : "en" });
+    return true;
+  } catch (error) {
+    console.warn(`[AGENT] could not speak the reply: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+}
