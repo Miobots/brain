@@ -12,6 +12,8 @@ const modelRole = (optionValue(args, "--model-role") ?? process.env.MCP_MODEL_RO
 const maxIterationsValue = optionValue(args, "--max-iterations");
 const maxIterations = maxIterationsValue === undefined ? undefined : Number(maxIterationsValue);
 const url = `http://localhost:${process.env.PORT ?? 8080}/dev/mcp-agent`;
+const token = process.env.MCP_DEV_HTTP_TOKEN;
+if (!token) throw new Error("MCP_DEV_HTTP_TOKEN is required for MCP dev chat");
 const rl = createInterface({ input: process.stdin, output: process.stdout });
 
 console.log(`MCP Agent dev chat -> ${url}`);
@@ -29,7 +31,7 @@ try {
     try {
       const response = await fetch(url, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
         body: JSON.stringify({
           instruction,
           ...(serverId ? { server_id: serverId } : {}),

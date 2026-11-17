@@ -287,6 +287,9 @@ describe("MCP Agent execution loop", () => {
         expect(result.iterations).toBe(2);
         expect(result.errors.at(-1)?.code).toBe("max_iterations");
         expect(deps.chat).toHaveBeenCalledTimes(2);
+
+        const capped = await runMCPAgent({ instruction: "Continue" }, deps, { budget: { maxIterations: 100 } });
+        expect(capped.iterations).toBe(5);
     });
 
     it("handles model failures and empty responses", async () => {

@@ -16,14 +16,14 @@ bun run typecheck
 | `ws://…/ws` | The hub. Heart, Synapse and Ganglion dial in and authenticate with `sys.hello` |
 | `POST /dev/speak` | `{"text", "lang"}` → `voice.speak` straight to the robot, no LLM |
 | `POST /dev/utterance` | `{"text"}` → the Brain Tools ReAct loop, which may call native Brain tools such as `speak` |
-| `POST /dev/mcp-agent` | `{"instruction"}` → the independent MCP Agent loop, which may call tools from connected MCP servers |
+| `POST /dev/mcp-agent` | Bearer token and `{"instruction"}` → the independent MCP Agent loop, which may call tools from connected MCP servers |
 | `GET /health` | Connected devices |
 
 ### MCP transport
 
 Allow MCP sessions only for explicitly approved Ganglion device IDs with
 `MCP_ALLOWED_GANGLION_DEVICE_IDS=ganglion-laptop-01,ganglion-laptop-02`. An empty or missing
-allowlist fails closed for MCP while still allowing the ordinary authenticated device connection.
+allowlist rejects Ganglion at authentication.
 MCP uses the existing authenticated WebSocket and does not open another listener.
 
 The current development handshake uses a shared `DEV_TOKEN`; it authenticates possession of the
@@ -41,6 +41,11 @@ processes. Brain only permits tools named `filesystem.*`; Ganglion still confine
 configured approved directories. Deletion requires `confirmed: true`, and recursive deletion also
 requires `recursive: true`. MCP tool calls, results, errors, and progress are logged by the Brain
 server; prompt and tool-result contents are not logged.
+
+Set a private `MCP_DEV_HTTP_TOKEN` in Brain's `.env` and in the shell running `mcp-chat`. The
+endpoint returns 503 until a token is configured and 401 when the bearer token is missing or wrong.
+The MCP Agent is capped at five model iterations. A screenshot is announced through Heart before
+capture; if Heart cannot speak, capture is refused.
 
 Run Brain, Ganglion, and the interactive client in separate terminals:
 
@@ -81,7 +86,7 @@ malformed schemas, invalid arguments, and unknown permission classes fail closed
 normalized into the conversation, including image attachments passed through the shared AI
 attachment pipeline.
 
-The `/dev/*` endpoints carry no token, which is why the hub binds to `127.0.0.1` by default. Set
+Most `/dev/*` endpoints carry no token, which is why the hub binds to `127.0.0.1` by default. Set
 `HOST=0.0.0.0` only deliberately — for example, so a phone on the same Wi-Fi can reach it.
 
 To try it against the canonical Fake Heart, run `bun run sim` in `../miobots-protocol` alongside,

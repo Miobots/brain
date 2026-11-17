@@ -36,6 +36,7 @@ import { MCPToolExecutor } from "../agents/mcp-agent/tool-executor.ts";
 import { createMCPDevPermissionProvider } from "../agents/mcp-agent/dev-permission-provider.ts";
 import { MCPAgentRunner } from "../agents/mcp-agent/agent.ts";
 import type { MCPCallOptions, MCPModelRole } from "../agents/mcp-agent/types.ts";
+import { speakTool } from "./tools.ts";
 
 export { devices, deviceSeq };
 
@@ -70,7 +71,10 @@ class LoggingReadOnlyMCPToolExecutor extends MCPToolExecutor {
 const mcpDevExecutor = new LoggingReadOnlyMCPToolExecutor(
     mcpDevRegistry,
     mcpConnectionManager,
-    { permissionProvider: createMCPDevPermissionProvider(process.env.MCP_DEV_ALLOW_FILESYSTEM_ACTIONS === "true") },
+    {
+        permissionProvider: createMCPDevPermissionProvider(process.env.MCP_DEV_ALLOW_FILESYSTEM_ACTIONS === "true"),
+        announceScreenCapture: async () => { await speakTool.execute!({ text: "Taking a look at your screen" }); },
+    },
 );
 const mcpDevAgent = new MCPAgentRunner({
     registry: mcpDevRegistry,
@@ -142,6 +146,17 @@ export const httpServer = http.createServer((req, res) => {
     res.setHeader("Content-Type", "application/json");
 
     if (req.method === "POST" && req.url === "/dev/mcp-agent") {
+        const token = process.env.MCP_DEV_HTTP_TOKEN;
+        if (!token) {
+            res.writeHead(503);
+            res.end(JSON.stringify({ error: "MCP_DEV_HTTP_TOKEN is required" }));
+            return;
+        }
+        if (req.headers.authorization !== `Bearer ${token}`) {
+            res.writeHead(401);
+            res.end(JSON.stringify({ error: "Unauthorized" }));
+            return;
+        }
         let body = "";
         let bodyLength = 0;
         let tooLarge = false;
@@ -192,8 +207,8 @@ export const httpServer = http.createServer((req, res) => {
                 return badRequest("'model_role' must be orchestrator, vision, fast, or reasoning");
             }
             if (maxIterations !== undefined &&
-                (typeof maxIterations !== "number" || !Number.isInteger(maxIterations) || maxIterations < 1 || maxIterations > 10)) {
-                return badRequest("'max_iterations' must be an integer from 1 to 10");
+                (typeof maxIterations !== "number" || !Number.isInteger(maxIterations) || maxIterations < 1 || maxIterations > 5)) {
+                return badRequest("'max_iterations' must be an integer from 1 to 5");
             }
 
             const serverIds = typeof serverId === "string" ? [serverId.trim()] : undefined;
@@ -624,6 +639,16 @@ wss.on("connection", (ws) => {
                 });
                 ws.send(encode(badWelcome));
                 console.log(`[SERVER] BAD DEV_TOKEN closing client`);
+                ws.close();
+                return;
+            }
+
+            if (hello.role === DeviceRole.GANGLION && !config.mcpAllowedGanglionDeviceIds.includes(hello.device_id)) {
+                ws.send(encode(createWelcomeAck(envelope, {
+                    accepted: false,
+                    reason: "Ganglion device is not allowlisted",
+                    seq: outboundSeq,
+                })));
                 ws.close();
                 return;
             }

@@ -16,6 +16,7 @@ import { speakTool } from "../../../src/brain/tools.ts";
 
 process.env.PORT = "45879";
 process.env.DEV_TOKEN = "routing-test-token";
+process.env.MCP_ALLOWED_GANGLION_DEVICE_IDS = "ganglion-second,ganglion-first,only-ganglion,explicit-ganglion,spoofed-ganglion,route-ganglion";
 
 let serverModule: typeof import("../../../src/brain/server.ts");
 const clients: WebSocket[] = [];

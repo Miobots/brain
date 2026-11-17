@@ -20,6 +20,7 @@ export interface MCPToolPermissionProvider {
 export interface MCPToolExecutorOptions {
   permissionProvider?: MCPToolPermissionProvider;
   defaultTimeoutMs?: number;
+  announceScreenCapture?: () => Promise<void>;
 }
 
 export class MCPToolExecutor {
@@ -59,6 +60,15 @@ export class MCPToolExecutor {
 
     const session = this.manager.getSession(tool.serverId);
     if (!session) return failure("server_unavailable", "MCP server session is unavailable");
+
+    if (tool.originalName === "screen.get_screenshot") {
+      if (!this.options.announceScreenCapture) return failure("announcement_unavailable", "Screen capture announcement is unavailable");
+      try {
+        await this.options.announceScreenCapture();
+      } catch {
+        return failure("announcement_failed", "Could not announce screen capture");
+      }
+    }
 
     const callOptions: MCPCallOptions = {
       signal: options.signal,

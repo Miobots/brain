@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import {
+    BrainCapabilities,
     DeviceRole,
     Kind,
     Topics,
@@ -13,11 +14,13 @@ import {
 import { config } from "../../../src/brain/config.ts";
 import { devices, deviceRoles } from "../../../src/brain/devices.ts";
 import { mcpConnectionManager } from "../../../src/agents/mcp-agent/manager.ts";
+import { brainManifest } from "../../../src/brain/capabilities.ts";
 import type { MCPAuthenticatedPeer } from "../../../src/agents/mcp-agent/types.ts";
 
 process.env.PORT = "45880";
 process.env.DEV_TOKEN = "mcp-test-token";
 process.env.MCP_ALLOWED_GANGLION_DEVICE_IDS = "ganglion-test";
+process.env.MCP_DEV_HTTP_TOKEN = "mcp-http-test-token";
 config.mcp_request_timeout_ms = 250;
 
 let serverModule: typeof import("../../../src/brain/server.ts");
@@ -156,10 +159,35 @@ describe("Brain MCP transport and session", () => {
     });
 
     it("fails closed for a non-allowlisted Ganglion", async () => {
-        const { client } = await connectGanglion("other-ganglion");
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        const address = serverModule.wss.address();
+        const port = address && typeof address !== "string" ? address.port : config.port;
+        const client = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+        const welcome = await new Promise<{ accepted?: boolean }>((resolve, reject) => {
+            client.once("open", () => client.send(encode(newEnvelope({
+                kind: Kind.CMD,
+                topic: Topics.SYS_HELLO,
+                payload: { device_id: "other-ganglion", token: config.devToken, protocol_version: 1, role: DeviceRole.GANGLION },
+                seq: new SequenceCounter(),
+            }))));
+            client.once("message", (raw) => resolve(rawEnvelope(raw).payload as { accepted?: boolean }));
+            client.once("error", reject);
+        });
+        expect(welcome.accepted).toBe(false);
         expect(mcpConnectionManager.getSession("other-ganglion")).toBeUndefined();
+        expect(deviceRoles.has("other-ganglion")).toBe(false);
+        expect(brainManifest(deviceRoles.values()).capabilities[BrainCapabilities.LAPTOP_DAEMON]?.state).toBe("unavailable");
         client.close();
+    });
+
+    it("requires a bearer token for the MCP Agent endpoint", async () => {
+        const address = serverModule.wss.address();
+        const port = address && typeof address !== "string" ? address.port : config.port;
+        const url = `http://127.0.0.1:${port}/dev/mcp-agent`;
+        const body = JSON.stringify({ instruction: "Check my system status" });
+        const unauthorized = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body });
+        expect(unauthorized.status).toBe(401);
+        const authorized = await fetch(url, { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer mcp-http-test-token" }, body });
+        expect(authorized.status).toBe(503); // Authenticated; no Ganglion is connected.
     });
 
     it("rejects server-initiated MCP requests", async () => {

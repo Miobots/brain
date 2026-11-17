@@ -17,7 +17,7 @@ import type {
   OutputBlock,
 } from "./types.ts";
 
-export const DEFAULT_MCP_AGENT_MAX_ITERATIONS = 15;
+export const DEFAULT_MCP_AGENT_MAX_ITERATIONS = 5;
 
 export interface MCPAgentDependencies {
   registry: MCPToolRegistry;
@@ -185,7 +185,7 @@ export class MCPAgentRunner implements MCPAgentLoopContract {
 
 function getMaxIterations(value: number | undefined): number {
   return typeof value === "number" && Number.isFinite(value)
-    ? Math.max(1, Math.floor(value))
+    ? Math.min(DEFAULT_MCP_AGENT_MAX_ITERATIONS, Math.max(1, Math.floor(value)))
     : DEFAULT_MCP_AGENT_MAX_ITERATIONS;
 }
 

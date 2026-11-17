@@ -100,6 +100,24 @@ describe("MCP Phase 5 tool registry and executor", () => {
         expect(execute).toHaveBeenCalledTimes(1);
     });
 
+    it("announces every screenshot before calling Ganglion", async () => {
+        const events: string[] = [];
+        const session = { callTool: async () => { events.push("capture"); return { ok: true, output: [] }; } } as unknown as MCPSession;
+        const registry = new MCPToolRegistry();
+        const screenshot = tool("alpha", "screen.get_screenshot");
+        registry.register(screenshot);
+        const denied = new MCPToolExecutor(registry, fakeManager(session), { permissionProvider: permission(true) });
+        expect((await denied.execute(screenshot.qualifiedName, { value: "a" })).error?.code).toBe("announcement_unavailable");
+        expect(events).toEqual([]);
+
+        const executor = new MCPToolExecutor(registry, fakeManager(session), {
+            permissionProvider: permission(true),
+            announceScreenCapture: async () => { events.push("announce"); },
+        });
+        expect((await executor.execute(screenshot.qualifiedName, { value: "a" })).ok).toBe(true);
+        expect(events).toEqual(["announce", "capture"]);
+    });
+
     it("keeps MCP DEV actions disabled by default and scopes opt-in to filesystem actions", async () => {
         const provider = createMCPDevPermissionProvider(false);
         const registry = new MCPToolRegistry();
