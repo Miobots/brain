@@ -54,6 +54,11 @@ function save(list: PairedGanglion[]): void {
 
 const sha256 = (token: string): Buffer => createHash("sha256").update(token).digest();
 
+/** What the app may see about each paired laptop: never its token hash. */
+export function listPaired(): { device_id: string; name: string; paired_at: string }[] {
+  return load().map(({ device_id, name, paired_at }) => ({ device_id, name, paired_at }));
+}
+
 export function isPaired(deviceId: string): boolean {
   return load().some((entry) => entry.device_id === deviceId);
 }

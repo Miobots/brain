@@ -19,15 +19,20 @@ function url(): string {
   return `ws://127.0.0.1:${address && typeof address !== "string" ? address.port : config.port}/ws`;
 }
 
-function open(): Promise<{ client: WebSocket; next: () => Promise<ReturnType<typeof decode>> }> {
+function open(): Promise<{ client: WebSocket; next: () => Promise<ReturnType<typeof decode>>; deviceLists: unknown[] }> {
   return new Promise((resolve, reject) => {
     const client = new WebSocket(url());
     clients.push(client);
     const inbox: ReturnType<typeof decode>[] = [];
+    const deviceLists: unknown[] = [];
     const waiters: ((message: ReturnType<typeof decode>) => void)[] = [];
     client.on("message", (raw) => {
       const message = decode(raw instanceof ArrayBuffer ? Buffer.from(raw) : Array.isArray(raw) ? Buffer.concat(raw) : raw);
       if (message.topic === Topics.SYS_HEARTBEAT || message.topic === Topics.CAP_MANIFEST) return;
+      if (message.topic === Topics.SYS_DEVICES) {
+        deviceLists.push(message.payload);
+        return;
+      }
       const waiter = waiters.shift();
       if (waiter) waiter(message);
       else inbox.push(message);
@@ -37,7 +42,7 @@ function open(): Promise<{ client: WebSocket; next: () => Promise<ReturnType<typ
       if (queued) done(queued);
       else waiters.push(done);
     });
-    client.once("open", () => resolve({ client, next }));
+    client.once("open", () => resolve({ client, next, deviceLists }));
     client.once("error", reject);
   });
 }
@@ -91,6 +96,12 @@ describe("pairing a laptop (G0.2)", () => {
     const withOwnToken = await open();
     withOwnToken.client.send(hello("pair-laptop", laptopAck.token!, DeviceRole.GANGLION));
     expect((await withOwnToken.next()).payload).toMatchObject({ accepted: true });
+
+    // The app is told the laptop is paired, then that it is online — and never sees a token or hash.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const latest = app.deviceLists.at(-1) as { devices: Record<string, unknown>[] };
+    expect(latest.devices).toContainEqual(expect.objectContaining({ device_id: "pair-laptop", name: "stb-laptop", online: true }));
+    expect(JSON.stringify(app.deviceLists)).not.toMatch(/token|sha256/);
   });
 
   it("refuses a wrong code and a malformed pair request", async () => {

@@ -20,6 +20,7 @@ import {
     type AckPayload,
     type HelloPayload,
     type CapabilityManifestPayload,
+    type DevicesPayload,
 } from "@miobots/protocol";
 import { config } from "./config.ts";
 import { createHeartbeat, handleAck, handleHeartBeat, sendCommand } from "./hub.ts";
@@ -31,7 +32,7 @@ import { deviceGenerations } from "./devices.ts";
 import { mcpConnectionManager } from "../agents/mcp-agent/manager.ts";
 import type { MCPAuthenticatedPeer } from "../agents/mcp-agent/types.ts";
 import { brainManifest } from "./capabilities.ts";
-import { cancelPairing, confirmPairing, isPairedToken, requestPairing } from "./pairing.ts";
+import { cancelPairing, confirmPairing, isPairedToken, listPaired, requestPairing } from "./pairing.ts";
 import { deliverInbox } from "./approvals.ts";
 import { describeSituation, recordBattery, robotSituations } from "./context.ts";
 import {
@@ -137,6 +138,19 @@ function relayRobotTelemetry(sourceId: string, topic: string, payload: unknown):
     latestRobotTelemetry.set(topic, { sourceId, payload, atMs: Date.now() });
     for (const [id, role] of deviceRoles) {
         if (role === DeviceRole.SYNAPSE) sendTo(id, topic, payload, Kind.TELEM);
+    }
+}
+
+/** The paired laptops and whether each is connected (`sys.devices`). One app, or every app. */
+export function relayDevicesToApps(onlyTo?: string): void {
+    const payload: DevicesPayload = {
+        devices: listPaired().map((device) => ({
+            ...device,
+            online: devices.has(device.device_id) && deviceRoles.get(device.device_id) === DeviceRole.GANGLION,
+        })),
+    };
+    for (const [id, role] of deviceRoles) {
+        if (role === DeviceRole.SYNAPSE && (!onlyTo || id === onlyTo)) sendTo(id, Topics.SYS_DEVICES, payload);
     }
 }
 
@@ -730,6 +744,7 @@ if (hello.role === DeviceRole.GANGLION) {
         generation,
     };
 
+    relayDevicesToApps();
     void mcpConnectionManager.attach(peer)
         .then(async () => {
             console.log(`[SERVER] MCP ready device=${authenticatedDeviceId}`);
@@ -755,6 +770,7 @@ if (hello.role === DeviceRole.GANGLION) {
                     if (devices.has(sourceId)) sendTo(deviceId, Topics.CAP_MANIFEST, cached);
                 }
                 sendTo(deviceId, Topics.CAP_MANIFEST, brainManifest(deviceRoles.values()));
+                relayDevicesToApps(deviceId);
                 // Approvals nobody answered wait here, not silently cancelled (G2.5).
                 void deliverInbox(deviceId);
                 for (const [topic, cached] of latestRobotTelemetry) {
@@ -813,6 +829,7 @@ if (hello.role === DeviceRole.GANGLION) {
                 ? confirmPairing(envelope.payload.code)
                 : { accepted: false, reason: "A pairing code is six digits." };
             ws.send(encode(createAck(envelope, response, outboundSeq)));
+            if (response.accepted) relayDevicesToApps();
         }
         if (deviceRoles.get(deviceId) === DeviceRole.SYNAPSE && envelope.kind === Kind.CMD && envelope.topic === Topics.NAV_GOTO) {
             void (async () => {
@@ -860,6 +877,7 @@ if (hello.role === DeviceRole.GANGLION) {
         if (waitingPairCode) cancelPairing(waitingPairCode);
         if (deviceId) {
             const isCurrent = devices.get(deviceId) === ws && deviceGenerations.get(deviceId) === generation;
+            const wasLaptop = deviceRoles.get(deviceId) === DeviceRole.GANGLION;
             if (isCurrent) {
                 resetSequence(deviceId);
                 devices.delete(deviceId);
@@ -867,6 +885,7 @@ if (hello.role === DeviceRole.GANGLION) {
                 deviceRoles.delete(deviceId);
                 deviceGenerations.delete(deviceId);
                 void mcpConnectionManager.detach({ deviceId, socket: ws, generation });
+                if (wasLaptop) relayDevicesToApps();
             }
             // The manifest is deliberately kept: an app must be able to show last-known state
             // with a staleness marker when the robot is off (TASKS.md S1.2, third row).
