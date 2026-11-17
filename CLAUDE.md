@@ -42,6 +42,11 @@ sender is a different language on a different machine.
 can verify. Brain must not report on navigation or battery; Heart must not report on smart home or
 Ganglion.
 
+**The main agent reaches Ganglion through one tool, `ask_laptop`, and nothing else**
+(BRAIN_DECISIONS 26). It delegates to the separate MCP agent in `src/agents/mcp-agent/`. Ganglion's
+own tools never enter the main tool list. With no daemon connected, `ask_laptop` returns "I can't
+reach your laptop right now" instead of throwing, so the rest of the request carries on.
+
 ---
 
 ## The rule that governs every new feature
