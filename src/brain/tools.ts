@@ -13,7 +13,7 @@ import { MCPAgentRunner } from "../agents/mcp-agent/agent.ts";
 import { mcpConnectionManager } from "../agents/mcp-agent/manager.ts";
 import { MCPToolRegistry } from "../agents/mcp-agent/tool-registry.ts";
 import { MCPToolExecutor } from "../agents/mcp-agent/tool-executor.ts";
-import { createMCPDevPermissionProvider } from "../agents/mcp-agent/dev-permission-provider.ts";
+import { createApprovalPermissionProvider, setInboxRunner } from "./approvals.ts";
 import type { MCPAgentResult } from "../agents/mcp-agent/types.ts";
 
 /**
@@ -54,7 +54,8 @@ export const speakTool: ToolDefinition = {
     required: ["text"],
   },
   execute: async (args: Record<string, unknown>) => {
-    const text = typeof args.text === "string" ? args.text.trim() : "";
+    // Speech engines read markdown aloud, and models like bold numbers.
+    const text = typeof args.text === "string" ? args.text.replace(/[*_`#]/g, "").trim() : "";
     if (!text) {
       throw new Error("Missing or empty 'text' argument for speak tool");
     }
@@ -148,6 +149,8 @@ export const cancelNavigationTool: ToolDefinition = {
 };
 
 export const LAPTOP_UNREACHABLE = "I can't reach your laptop right now.";
+export const APPROVAL_REJECTED = "That was rejected on your phone, so I didn't do it.";
+export const APPROVAL_UNANSWERED = "Nobody approved that on your phone in time, so I haven't done it. It's waiting in the app; approve it there and I'll do it then.";
 
 export interface AskLaptopDependencies {
   isConnected: () => boolean;
@@ -177,6 +180,11 @@ export function createAskLaptopTool(deps: AskLaptopDependencies): ToolDefinition
       if (!deps.isConnected()) return { status: "unavailable", message: LAPTOP_UNREACHABLE };
       try {
         const result = await deps.run(task);
+        // Said word for word, never paraphrased: a model asked to "let me know if you'd like me to go
+        // ahead" would be inviting a spoken approval, which can never count (BRAIN_DECISIONS 27).
+        const codes = result.errors.map((error) => error.code);
+        if (codes.includes("approval_rejected")) return { status: "not_approved", message: APPROVAL_REJECTED };
+        if (codes.includes("approval_required")) return { status: "not_approved", message: APPROVAL_UNANSWERED };
         const text = result.output
           .flatMap((block) => (block.type === "text" ? [block.text] : []))
           .join("\n")
@@ -191,16 +199,18 @@ export function createAskLaptopTool(deps: AskLaptopDependencies): ToolDefinition
   };
 }
 
-// Its own executor, always read-only: the dev endpoint's filesystem auto-approval must never be
-// reachable by voice. Action-tier tools wait for G2.3's approval surface.
+// Its own executor: the dev endpoint's auto-approval must never be reachable by voice. Read tools
+// run; Action tools wait for a tap on the phone, and the robot only announces (BRAIN_DECISIONS 27).
+const sayAloud = async (text: string) => { await speakTool.execute!({ text }); };
 const laptopRegistry = new MCPToolRegistry(mcpConnectionManager);
-const laptopAgent = new MCPAgentRunner({
-  registry: laptopRegistry,
-  manager: mcpConnectionManager,
-  executor: new MCPToolExecutor(laptopRegistry, mcpConnectionManager, {
-    permissionProvider: createMCPDevPermissionProvider(false),
-    announceScreenCapture: async () => { await speakTool.execute!({ text: "Taking a look at your screen" }); },
-  }),
+const laptopExecutor = new MCPToolExecutor(laptopRegistry, mcpConnectionManager, {
+  permissionProvider: createApprovalPermissionProvider({ announce: sayAloud }),
+  announceScreenCapture: () => sayAloud("Taking a look at your screen"),
+});
+const laptopAgent = new MCPAgentRunner({ registry: laptopRegistry, manager: mcpConnectionManager, executor: laptopExecutor });
+setInboxRunner(async (qualifiedName, args) => {
+  const result = await laptopExecutor.execute(qualifiedName, args);
+  return result.ok ? "Done, that laptop request you approved has run." : `That laptop request failed: ${result.error?.message ?? "unknown error"}`;
 });
 
 export const askLaptopTool = createAskLaptopTool({

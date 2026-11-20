@@ -12,7 +12,7 @@ export interface MCPToolPermissionRequest {
 
 export interface MCPToolPermissionProvider {
   authorize(request: MCPToolPermissionRequest): Promise<
-    | { allowed: true }
+    | { allowed: true; meta?: Record<string, unknown> }
     | { allowed: false; code?: "permission_denied" | "approval_required" | "approval_rejected"; message?: string }
   >;
 }
@@ -79,6 +79,7 @@ export class MCPToolExecutor {
       toolName: tool.qualifiedName,
       serverId: tool.serverId,
       arguments: argumentsValue,
+      ...(permission.meta ? { meta: permission.meta } : {}),
     }, callOptions);
 
     const execution = tool.permission === "action"

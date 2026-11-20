@@ -32,6 +32,7 @@ import { mcpConnectionManager } from "../agents/mcp-agent/manager.ts";
 import type { MCPAuthenticatedPeer } from "../agents/mcp-agent/types.ts";
 import { brainManifest } from "./capabilities.ts";
 import { cancelPairing, confirmPairing, isPairedToken, requestPairing } from "./pairing.ts";
+import { deliverInbox } from "./approvals.ts";
 import { describeSituation, recordBattery, robotSituations } from "./context.ts";
 import {
     handleNavigationFeedback,
@@ -754,6 +755,8 @@ if (hello.role === DeviceRole.GANGLION) {
                     if (devices.has(sourceId)) sendTo(deviceId, Topics.CAP_MANIFEST, cached);
                 }
                 sendTo(deviceId, Topics.CAP_MANIFEST, brainManifest(deviceRoles.values()));
+                // Approvals nobody answered wait here, not silently cancelled (G2.5).
+                void deliverInbox(deviceId);
                 for (const [topic, cached] of latestRobotTelemetry) {
                     if (devices.has(cached.sourceId) && Date.now() - cached.atMs < 30_000) {
                         sendTo(deviceId, topic, cached.payload, Kind.TELEM);

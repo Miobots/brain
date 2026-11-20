@@ -16,6 +16,7 @@
 8. **Capture Worker & Seven-Day Window:** Every picture the robot keeps is labelled by a loop over unprocessed capture rows — no job queue, off the request path, through the `vision` capability. Vectors are stored but not searched until `B7.4`; search stays trigram. After 7 days the picture and its scene vector are deleted; an object row is never deleted by age (BRAIN_DECISIONS 25).
 9. **Ganglion Behind One Tool:** The main agent reaches Ganglion only through `ask_laptop`, which delegates to the separate MCP agent (`src/agents/mcp-agent/`). Ganglion's tools never enter the main tool list. No daemon connected → return "I can't reach your laptop right now", never throw (BRAIN_DECISIONS 26).
 10. **Laptops Pair, Never Share:** A Ganglion is admitted only by its own paired token (`sys.pair` → code typed in the app → `sys.pair_confirm`); Brain stores token hashes only. The shared dev token never admits role `ganglion` (GANGLION_DECISIONS 29).
+11. **A Tap, Never a Voice:** Laptop Action tools wait for an ACK to `sys.approval` from an app connection and then carry an approval ticket (`_meta`, exact-argument hash, 30 s, single use). No tool approves; voice only announces; unanswered requests go to the inbox (BRAIN_DECISIONS 27).
 
 ---
 

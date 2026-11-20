@@ -78,6 +78,8 @@ export interface MCPToolCall {
   toolName: string;
   serverId: string;
   arguments: Record<string, unknown>;
+  /** Sent as `params._meta`, e.g. the approval ticket for an Action-tier call (BRAIN_DECISIONS 27). */
+  meta?: Record<string, unknown>;
 }
 
 export interface MCPCallOptions {
