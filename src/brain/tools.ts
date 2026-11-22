@@ -171,7 +171,8 @@ export function createAskLaptopTool(deps: AskLaptopDependencies): ToolDefinition
   return {
     name: "ask_laptop",
     description:
-      "Ask the user's paired laptop to do a task: check its battery or status, or find and read files in approved folders. " +
+      "Ask the user's paired laptop to do a task: check its battery or status, find and read files in approved folders, " +
+      "play, pause or skip music and change its volume, open a registered app or website, or run a registered script by name. " +
       "Describe the whole task in one sentence; the laptop works out the steps.",
     parameters: {
       type: "object",
