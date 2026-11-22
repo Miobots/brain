@@ -18,6 +18,7 @@
 10. **Laptops Pair, Never Share:** A Ganglion is admitted only by its own paired token (`sys.pair` → code typed in the app → `sys.pair_confirm`); Brain stores token hashes only. The shared dev token never admits role `ganglion` (GANGLION_DECISIONS 29).
 11. **A Tap, Never a Voice:** Laptop Action tools wait for an ACK to `sys.approval` from an app connection and then carry an approval ticket (`_meta`, exact-argument hash, 30 s, single use). No tool approves; voice only announces; unanswered requests go to the inbox (BRAIN_DECISIONS 27).
 12. **Pushes Say Only "Waiting":** Approval pushes (Expo, online-only) carry no tool name or arguments; the details and the Approve button stay in the app. No internet means no push and nothing else changes (BRAIN_DECISIONS 28).
+13. **Nothing Runs Unrecorded:** Every laptop call writes one hash-chained Postgres row before it runs, naming the approver; no row, no call. The kill switch state is the newest kill switch row, and switching it on never depends on the database. Tests pass an explicit store to `initAudit` (BRAIN_DECISIONS 29).
 
 ---
 
