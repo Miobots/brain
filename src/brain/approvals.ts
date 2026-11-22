@@ -13,6 +13,7 @@ import {
 import { devices, deviceRoles } from "./devices.ts";
 import { sendCommandHandle } from "./hub.ts";
 import type { MCPToolPermissionProvider } from "../agents/mcp-agent/tool-executor.ts";
+import { killSwitchActive, recordToolCall } from "./audit.ts";
 
 /**
  * Asking a human before a laptop action runs (B5.2, B5.3, G2.3, G2.5; BRAIN_DECISIONS 27).
@@ -113,18 +114,34 @@ export function createApprovalPermissionProvider(options: {
   /** Reach a phone whose app is closed (BRAIN_DECISIONS 28). Fire-and-forget. */
   notify?: () => Promise<void>;
   ask?: typeof askApps;
+  /** Writes the audit row before the call runs (G3.1). If it throws, the call is refused. */
+  record?: typeof recordToolCall;
 } = {}): MCPToolPermissionProvider {
   const ask = options.ask ?? askApps;
+  const record = options.record ?? recordToolCall;
   announceLater = options.announce;
+
+  // Exactly one row per executed call, written first: nothing runs unrecorded.
+  const allow = async (toolName: string, args: Record<string, unknown>, ticket?: ApprovalTicket) => {
+    try {
+      await record(toolName, args, ticket?.approved_by);
+    } catch (error) {
+      console.warn(`[AUDIT] refused ${toolName}: ${error instanceof Error ? error.message : String(error)}`);
+      return { allowed: false as const, code: "audit_unavailable" as const, message: "The audit log can't be written right now, so the laptop wasn't used." };
+    }
+    return ticket ? { allowed: true as const, meta: { [APPROVAL_META_KEY]: ticket } } : { allowed: true as const };
+  };
+
   return {
     authorize: async ({ tool, arguments: args }) => {
-      if (tool.permission === "read") return { allowed: true };
+      if (killSwitchActive()) return { allowed: false as const, code: "killswitch" as const, message: "Laptop access is switched off in the app." };
       const toolName = tool.originalName ?? tool.name;
+      if (tool.permission === "read") return allow(toolName, args);
 
       const waiting = preApproved.get(callKey(toolName, args));
       if (waiting) {
         preApproved.delete(callKey(toolName, args));
-        return { allowed: true, meta: { [APPROVAL_META_KEY]: waiting } };
+        return allow(toolName, args, waiting);
       }
 
       const approvalId = randomUUID();
@@ -133,7 +150,7 @@ export function createApprovalPermissionProvider(options: {
       const outcome = await ask(approvalId, toolName, args);
       if (outcome.approved) {
         console.log(`[APPROVAL] approved id=${approvalId} tool=${toolName} by=${outcome.approvedBy}`);
-        return { allowed: true, meta: { [APPROVAL_META_KEY]: ticket(approvalId, outcome.approvedBy, toolName, args) } };
+        return allow(toolName, args, ticket(approvalId, outcome.approvedBy, toolName, args));
       }
       if (outcome.unanswered) {
         addToInbox({ approvalId, toolName, qualifiedName: tool.qualifiedName, args });
@@ -158,6 +175,12 @@ export function setInboxRunner(run: (qualifiedName: string, args: Record<string,
 
 export function inboxSize(): number {
   return inbox.size;
+}
+
+/** The kill switch went on: nothing waiting may run later (B5.6). */
+export function clearInbox(): void {
+  inbox.clear();
+  preApproved.clear();
 }
 
 /**
