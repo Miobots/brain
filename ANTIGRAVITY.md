@@ -18,6 +18,7 @@
 10. **Laptops Pair, Never Share:** A Ganglion is admitted only by its own paired token (`sys.pair` → code typed in the app → `sys.pair_confirm`); Brain stores token hashes only. The shared dev token never admits role `ganglion` (GANGLION_DECISIONS 29).
 11. **A Tap, Never a Voice:** Laptop Action tools wait for an ACK to `sys.approval` from an app connection and then carry an approval ticket (`_meta`, exact-argument hash, 30 s, single use). No tool approves; voice only announces; unanswered requests go to the inbox (BRAIN_DECISIONS 27).
 12. **Pushes Say Only "Waiting":** Approval pushes (Expo, online-only) carry no tool name or arguments; the details and the Approve button stay in the app. No internet means no push and nothing else changes (BRAIN_DECISIONS 28).
+13. **Confirm Events, Act Once:** Every event that waits in a dialer's outbox (`queuesInOutbox`) gets an `ACK sys.receipt` naming its `msg_id`, sent after it is handled; a re-sent copy is confirmed again but acted on once (`src/brain/receipts.ts`, ENVELOPE §8).
 
 ---
 

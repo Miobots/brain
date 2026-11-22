@@ -59,6 +59,11 @@ inbox and is asked again when an app connects.
 **Approval pushes are online-only and carry no arguments** (BRAIN_DECISIONS 28). `src/brain/push.ts`
 only says "an approval is waiting"; never put a tool name, an argument or a file name in a push.
 
+**Every event a dialer keeps in its outbox gets an `ACK sys.receipt`, and a re-sent copy is acted on
+once** (ENVELOPE §8). `queuesInOutbox` decides which; `src/brain/receipts.ts` remembers `msg_id`s.
+The receipt goes out only after the event has been handled — it is what lets the robot delete it.
+Any new handler for an event must therefore be safe to skip on a duplicate.
+
 ---
 
 ## The rule that governs every new feature
