@@ -13,7 +13,7 @@ export interface MCPToolPermissionRequest {
 export interface MCPToolPermissionProvider {
   authorize(request: MCPToolPermissionRequest): Promise<
     | { allowed: true; meta?: Record<string, unknown> }
-    | { allowed: false; code?: "permission_denied" | "approval_required" | "approval_rejected"; message?: string }
+    | { allowed: false; code?: "permission_denied" | "approval_required" | "approval_rejected" | "audit_unavailable" | "killswitch"; message?: string }
   >;
 }
 
@@ -47,6 +47,10 @@ export class MCPToolExecutor {
       return failure("permission_unknown", "MCP tool permission is unknown");
     }
 
+    // Validate before asking anyone: never ask a human to approve a call the tool would reject.
+    const validation = validateToolArguments(tool.inputSchema, argumentsValue);
+    if (!validation.ok) return failure(validation.error.code, validation.error.message, validation.error);
+
     const permission = await this.options.permissionProvider?.authorize({
       tool,
       arguments: argumentsValue,
@@ -54,9 +58,6 @@ export class MCPToolExecutor {
       target: options.target,
     }) ?? { allowed: false, code: "approval_required", message: "MCP tool permission is not configured" };
     if (!permission.allowed) return failure(permission.code ?? "permission_denied", permission.message ?? "MCP tool permission denied");
-
-    const validation = validateToolArguments(tool.inputSchema, argumentsValue);
-    if (!validation.ok) return failure(validation.error.code, validation.error.message, validation.error);
 
     const session = this.manager.getSession(tool.serverId);
     if (!session) return failure("server_unavailable", "MCP server session is unavailable");

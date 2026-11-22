@@ -14,6 +14,7 @@ import { mcpConnectionManager } from "../agents/mcp-agent/manager.ts";
 import { MCPToolRegistry } from "../agents/mcp-agent/tool-registry.ts";
 import { MCPToolExecutor } from "../agents/mcp-agent/tool-executor.ts";
 import { createApprovalPermissionProvider, setInboxRunner } from "./approvals.ts";
+import { killSwitchActive } from "./audit.ts";
 import { notifyApprovalWaiting } from "./push.ts";
 import type { MCPAgentResult } from "../agents/mcp-agent/types.ts";
 
@@ -150,12 +151,16 @@ export const cancelNavigationTool: ToolDefinition = {
 };
 
 export const LAPTOP_UNREACHABLE = "I can't reach your laptop right now.";
+export const LAPTOP_SWITCHED_OFF = "Laptop access is switched off in the app, so I can't use your laptop.";
+export const AUDIT_UNAVAILABLE = "I can't write to the activity log right now, so I didn't use your laptop.";
 export const APPROVAL_REJECTED = "That was rejected on your phone, so I didn't do it.";
 export const APPROVAL_UNANSWERED = "Nobody approved that on your phone in time, so I haven't done it. It's waiting in the app; approve it there and I'll do it then.";
 
 export interface AskLaptopDependencies {
   isConnected: () => boolean;
   run: (task: string) => Promise<MCPAgentResult>;
+  /** The app's kill switch (B5.6). Checked before anything else. */
+  isSwitchedOff?: () => boolean;
 }
 
 /**
@@ -178,12 +183,15 @@ export function createAskLaptopTool(deps: AskLaptopDependencies): ToolDefinition
     execute: async (args: Record<string, unknown>) => {
       const task = typeof args.task === "string" ? args.task.trim() : "";
       if (!task) return { status: "error", message: "Missing laptop task." };
+      if (deps.isSwitchedOff?.()) return { status: "disabled", message: LAPTOP_SWITCHED_OFF };
       if (!deps.isConnected()) return { status: "unavailable", message: LAPTOP_UNREACHABLE };
       try {
         const result = await deps.run(task);
         // Said word for word, never paraphrased: a model asked to "let me know if you'd like me to go
         // ahead" would be inviting a spoken approval, which can never count (BRAIN_DECISIONS 27).
         const codes = result.errors.map((error) => error.code);
+        if (codes.includes("killswitch")) return { status: "disabled", message: LAPTOP_SWITCHED_OFF };
+        if (codes.includes("audit_unavailable")) return { status: "failed", message: AUDIT_UNAVAILABLE };
         if (codes.includes("approval_rejected")) return { status: "not_approved", message: APPROVAL_REJECTED };
         if (codes.includes("approval_required")) return { status: "not_approved", message: APPROVAL_UNANSWERED };
         const text = result.output
@@ -216,6 +224,7 @@ setInboxRunner(async (qualifiedName, args) => {
 
 export const askLaptopTool = createAskLaptopTool({
   isConnected: () => mcpConnectionManager.getReadyServers().length > 0,
+  isSwitchedOff: killSwitchActive,
   run: (task) => laptopAgent.execute({ instruction: task }, { modelRole: "fast" }),
 });
 

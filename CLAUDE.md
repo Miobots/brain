@@ -59,6 +59,12 @@ inbox and is asked again when an app connects.
 **Approval pushes are online-only and carry no arguments** (BRAIN_DECISIONS 28). `src/brain/push.ts`
 only says "an approval is waiting"; never put a tool name, an argument or a file name in a push.
 
+**Nothing on the laptop runs unrecorded** (BRAIN_DECISIONS 29). Every laptop call writes one
+hash-chained row to Postgres (`src/brain/audit.ts`) *before* it goes out, naming the approver; if
+the row can't be written, or `DATABASE_URL` is unset, the call is refused. **The kill switch's
+state is the newest kill switch row.** Switching it on always takes effect, even without the
+database. Tests must pass an explicit store to `initAudit`, never let it reach the real database.
+
 ---
 
 ## The rule that governs every new feature

@@ -15,6 +15,7 @@
     "start": "bun run src/index.ts",
     "chat": "bun run src/dev/chat.ts",
     "mcp-chat": "bun run src/dev/mcp-chat.ts",
+    "audit:verify": "bun run src/dev/audit-verify.ts",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "test": "bun test"
   },
@@ -32,6 +33,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
+    "@types/pg": "^8.23.1",
     "@types/ws": "^8.5.13",
     "tsx": "^4.23.5",
     "typescript": "5.9.3",

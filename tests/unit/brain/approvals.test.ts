@@ -25,12 +25,13 @@ process.env.DEV_TOKEN = "test-dev-token";
 
 const tool = (permission: "read" | "action", originalName = "open_app_or_url") =>
   ({ name: originalName, originalName, qualifiedName: `mcp__laptop__${originalName}`, permission }) as unknown as RegisteredMCPTool;
+const record = async () => {};
 const digest = (args: unknown) => createHash("sha256").update(canonicalJson(args)).digest("hex");
 
 describe("approval permission provider (B5.2, BRAIN_DECISIONS 27)", () => {
   it("lets read tools run without asking anyone", async () => {
     let asked = false;
-    const provider = createApprovalPermissionProvider({ ask: async () => { asked = true; return { approved: true, approvedBy: "x" }; } });
+    const provider = createApprovalPermissionProvider({ record, ask: async () => { asked = true; return { approved: true, approvedBy: "x" }; } });
     expect(await provider.authorize({ tool: tool("read", "system.get_status"), arguments: {} })).toEqual({ allowed: true });
     expect(asked).toBe(false);
   });
@@ -38,6 +39,7 @@ describe("approval permission provider (B5.2, BRAIN_DECISIONS 27)", () => {
   it("attaches a ticket naming the approver and the exact arguments", async () => {
     const said: string[] = [];
     const provider = createApprovalPermissionProvider({
+      record,
       announce: async (text) => { said.push(text); },
       ask: async () => ({ approved: true, approvedBy: "synapse-app" }),
     });
@@ -60,7 +62,7 @@ describe("approval permission provider (B5.2, BRAIN_DECISIONS 27)", () => {
   });
 
   it("runs an inbox item once a phone approves it, using the ticket from that approval (G2.5)", async () => {
-    const provider = createApprovalPermissionProvider({ ask: async () => ({ approved: false, unanswered: true, reason: "later" }) });
+    const provider = createApprovalPermissionProvider({ record, ask: async () => ({ approved: false, unanswered: true, reason: "later" }) });
     await provider.authorize({ tool: tool("action"), arguments: { target: "Docs" } });
     const ran: unknown[] = [];
     setInboxRunner(async (_qualifiedName, args) => {
