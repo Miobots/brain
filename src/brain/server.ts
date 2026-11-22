@@ -16,6 +16,8 @@ import {
     isNavGotoPayload,
     isPairConfirmPayload,
     isPushTokenPayload,
+    isKillSwitchPayload,
+    isAuditRequestPayload,
     isPairPayload,
     newEnvelope,
     queuesInOutbox,
@@ -36,7 +38,8 @@ import { mcpConnectionManager } from "../agents/mcp-agent/manager.ts";
 import type { MCPAuthenticatedPeer } from "../agents/mcp-agent/types.ts";
 import { brainManifest } from "./capabilities.ts";
 import { cancelPairing, confirmPairing, isPairedToken, listPaired, requestPairing } from "./pairing.ts";
-import { deliverInbox } from "./approvals.ts";
+import { clearInbox, deliverInbox } from "./approvals.ts";
+import { auditView, killSwitchActive, setKillSwitch } from "./audit.ts";
 import { setPushToken } from "./push.ts";
 import { describeSituation, recordBattery, robotSituations } from "./context.ts";
 import {
@@ -152,6 +155,7 @@ export function relayDevicesToApps(onlyTo?: string): void {
             ...device,
             online: devices.has(device.device_id) && deviceRoles.get(device.device_id) === DeviceRole.GANGLION,
         })),
+        killswitch_active: killSwitchActive(),
     };
     for (const [id, role] of deviceRoles) {
         if (role === DeviceRole.SYNAPSE && (!onlyTo || id === onlyTo)) sendTo(id, Topics.SYS_DEVICES, payload);
@@ -712,6 +716,13 @@ wss.on("connection", (ws) => {
                 ws.close();
                 return;
             }
+            // While the app's kill switch is on, no laptop gets in (B5.6). Its daemon keeps retrying.
+            if (hello.role === DeviceRole.GANGLION && killSwitchActive()) {
+                ws.send(encode(createWelcomeAck(envelope, { accepted: false, reason: "Laptop access is switched off in the app.", seq: outboundSeq })));
+                console.log(`[SERVER] kill switch on: refused laptop ${hello.device_id}`);
+                ws.close();
+                return;
+            }
 
             deviceId = hello.device_id;
             generation = (deviceGenerations.get(deviceId) ?? 0) + 1;
@@ -848,6 +859,33 @@ if (hello.role === DeviceRole.GANGLION) {
             if (isPushTokenPayload(payload)) setPushToken(deviceId, payload);
             const response: AckPayload = isPushTokenPayload(payload) ? { accepted: true } : { accepted: false, reason: "Not an Expo push token." };
             ws.send(encode(createAck(envelope, response, outboundSeq)));
+        }
+        if (deviceRoles.get(deviceId) === DeviceRole.SYNAPSE && envelope.kind === Kind.CMD && envelope.topic === Topics.SYS_KILLSWITCH) {
+            const from = deviceId;
+            void (async () => {
+                const payload = envelope.payload;
+                const response: AckPayload = isKillSwitchPayload(payload)
+                    ? await setKillSwitch(payload.active, from)
+                    : { accepted: false, reason: "The kill switch is on or off." };
+                if (isKillSwitchPayload(payload) && payload.active && response.accepted) {
+                    clearInbox();
+                    for (const [id, role] of deviceRoles) if (role === DeviceRole.GANGLION) devices.get(id)?.close();
+                }
+                ws.send(encode(createAck(envelope, response, outboundSeq)));
+                relayDevicesToApps();
+            })();
+        }
+        if (deviceRoles.get(deviceId) === DeviceRole.SYNAPSE && envelope.kind === Kind.CMD && envelope.topic === Topics.SYS_AUDIT) {
+            void (async () => {
+                let response: AckPayload;
+                try {
+                    if (!isAuditRequestPayload(envelope.payload)) throw new Error("Invalid audit request.");
+                    response = { accepted: true, audit: await auditView(envelope.payload.limit) };
+                } catch (error) {
+                    response = { accepted: false, reason: error instanceof Error ? error.message : "The activity log is unavailable." };
+                }
+                ws.send(encode(createAck(envelope, response, outboundSeq)));
+            })();
         }
         if (deviceRoles.get(deviceId) === DeviceRole.SYNAPSE && envelope.kind === Kind.CMD && envelope.topic === Topics.NAV_GOTO) {
             void (async () => {
