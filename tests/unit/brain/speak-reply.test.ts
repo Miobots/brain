@@ -6,10 +6,10 @@ const reply = (overrides: Partial<AgentResponse>): AgentResponse => ({
 });
 
 describe("speakUnspokenReply", () => {
-  it("speaks a text-only reply, without markdown", async () => {
+  it("speaks a text-only reply (the speak tool strips markdown)", async () => {
     const said: Record<string, unknown>[] = [];
     expect(await speakUnspokenReply(reply({}), async (args) => { said.push(args); })).toBe(true);
-    expect(said).toEqual([{ text: "Your laptop is at 100 %.", lang: "en" }]);
+    expect(said).toEqual([{ text: "Your laptop is at **100 %**.", lang: "en" }]);
   });
 
   it("speaks Urdu script as Urdu", async () => {

@@ -51,6 +51,11 @@ reach your laptop right now" instead of throwing, so the rest of the request car
 29). Pairing is `sys.pair` + `sys.pair_confirm` in `src/brain/pairing.ts`; Brain stores only token
 hashes. Do not reintroduce a device allowlist or a dev-token path for role `ganglion`.
 
+**A laptop action runs only on a tap in the app** (BRAIN_DECISIONS 27). `src/brain/approvals.ts`
+sends `sys.approval` with the exact arguments and attaches an approval ticket to the MCP call. **No
+tool may ever approve anything, and voice only announces.** An unanswered request waits in the
+inbox and is asked again when an app connects.
+
 ---
 
 ## The rule that governs every new feature

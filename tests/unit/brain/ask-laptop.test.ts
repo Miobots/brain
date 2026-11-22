@@ -39,3 +39,19 @@ describe("ask_laptop (BRAIN_DECISIONS 26)", () => {
     expect(toolRegistry.ask_laptop?.name).toBe("ask_laptop");
   });
 });
+
+describe("ask_laptop when a laptop action was not approved (BRAIN_DECISIONS 27)", () => {
+  it("says the fixed sentence instead of letting the model invite a spoken yes", async () => {
+    const { APPROVAL_REJECTED, APPROVAL_UNANSWERED } = await import("../../../src/brain/tools.ts");
+    const rejected = createAskLaptopTool({
+      isConnected: () => true,
+      run: async () => result({ status: "completed", output: [{ type: "text", text: "Let me know if you'd like me to go ahead." }], errors: [{ code: "approval_rejected", message: "no" }] }),
+    });
+    expect(await rejected.execute!({ task: "open spotify" })).toEqual({ status: "not_approved", message: APPROVAL_REJECTED });
+    const unanswered = createAskLaptopTool({
+      isConnected: () => true,
+      run: async () => result({ errors: [{ code: "approval_required", message: "later" }] }),
+    });
+    expect(await unanswered.execute!({ task: "open spotify" })).toEqual({ status: "not_approved", message: APPROVAL_UNANSWERED });
+  });
+});

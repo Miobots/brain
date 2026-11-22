@@ -8,6 +8,8 @@ import { config } from "../../../src/brain/config.ts";
 import { confirmPairing, isPairedToken, MAX_WRONG_CODES, requestPairing } from "../../../src/brain/pairing.ts";
 
 process.env.PORT = "45903";
+// The test server is shared by every file that imports it; several older files assume this token.
+process.env.DEV_TOKEN = "test-dev-token";
 
 let serverModule: typeof import("../../../src/brain/server.ts");
 const clients: WebSocket[] = [];
