@@ -56,6 +56,9 @@ sends `sys.approval` with the exact arguments and attaches an approval ticket to
 tool may ever approve anything, and voice only announces.** An unanswered request waits in the
 inbox and is asked again when an app connects.
 
+**Approval pushes are online-only and carry no arguments** (BRAIN_DECISIONS 28). `src/brain/push.ts`
+only says "an approval is waiting"; never put a tool name, an argument or a file name in a push.
+
 ---
 
 ## The rule that governs every new feature

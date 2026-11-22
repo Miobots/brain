@@ -14,6 +14,7 @@ import { mcpConnectionManager } from "../agents/mcp-agent/manager.ts";
 import { MCPToolRegistry } from "../agents/mcp-agent/tool-registry.ts";
 import { MCPToolExecutor } from "../agents/mcp-agent/tool-executor.ts";
 import { createApprovalPermissionProvider, setInboxRunner } from "./approvals.ts";
+import { notifyApprovalWaiting } from "./push.ts";
 import type { MCPAgentResult } from "../agents/mcp-agent/types.ts";
 
 /**
@@ -204,7 +205,7 @@ export function createAskLaptopTool(deps: AskLaptopDependencies): ToolDefinition
 const sayAloud = async (text: string) => { await speakTool.execute!({ text }); };
 const laptopRegistry = new MCPToolRegistry(mcpConnectionManager);
 const laptopExecutor = new MCPToolExecutor(laptopRegistry, mcpConnectionManager, {
-  permissionProvider: createApprovalPermissionProvider({ announce: sayAloud }),
+  permissionProvider: createApprovalPermissionProvider({ announce: sayAloud, notify: () => notifyApprovalWaiting() }),
   announceScreenCapture: () => sayAloud("Taking a look at your screen"),
 });
 const laptopAgent = new MCPAgentRunner({ registry: laptopRegistry, manager: mcpConnectionManager, executor: laptopExecutor });
