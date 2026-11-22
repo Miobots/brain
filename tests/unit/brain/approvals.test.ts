@@ -130,7 +130,7 @@ describe("only the phone can approve (G2.4)", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     app.client.send(encode(createAck(request, { accepted: false, reason: "not now" }, app.seq)));
 
-    expect(await outcome).toEqual({ approved: false, reason: "not now" });
+    expect(await outcome).toEqual({ approved: false, reason: "not now", by: "approve-app" });
   });
 
   it("is unanswered, not approved, when the phone stays silent", async () => {
