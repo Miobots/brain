@@ -83,6 +83,10 @@ describe("the kill switch (B5.6)", () => {
     const askLaptop = createAskLaptopTool({ isConnected: () => true, isSwitchedOff: killSwitchActive, run: async () => { throw new Error("must not run"); } });
     expect(await askLaptop.execute!({ task: "open the calculator" })).toEqual({ status: "disabled", message: LAPTOP_SWITCHED_OFF });
 
+    const { brainManifest } = await import("../../../src/brain/capabilities.ts");
+    const { BrainCapabilities, DeviceRole } = await import("@miobots/protocol");
+    expect(brainManifest([DeviceRole.GANGLION]).capabilities[BrainCapabilities.LAPTOP_DAEMON]).toEqual({ state: "unavailable", reason: "Laptop access is switched off in the app." });
+
     await initAudit(store); // a Brain restart reads the state back from the chain
     expect(killSwitchActive()).toBe(true);
     await setKillSwitch(false, "synapse-app");

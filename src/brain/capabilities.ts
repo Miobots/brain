@@ -3,6 +3,7 @@ import {
     DeviceRole,
     type CapabilityManifestPayload,
 } from "@miobots/protocol";
+import { killSwitchActive } from "./audit.ts";
 
 /**
  * The Brain's half of `cap.manifest` (TASKS.md S1.2) — the cloud side the robot cannot vouch for.
@@ -15,7 +16,9 @@ export function brainManifest(connectedRoles: Iterable<DeviceRole>): CapabilityM
 
     return {
         capabilities: {
-            [BrainCapabilities.LAPTOP_DAEMON]: laptopConnected
+            [BrainCapabilities.LAPTOP_DAEMON]: killSwitchActive()
+                ? { state: "unavailable", reason: "Laptop access is switched off in the app." }
+                : laptopConnected
                 ? { state: "available" }
                 : { state: "unavailable", reason: "The laptop daemon isn't running." },
             [BrainCapabilities.SMART_HOME]: { state: "unavailable", reason: "Smart home isn't set up yet." },
