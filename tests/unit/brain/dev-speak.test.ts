@@ -42,7 +42,7 @@ function connectHeart(deviceId = "heart-sim-01") {
                 topic: Topics.SYS_HELLO,
                 payload: {
                     device_id: deviceId,
-                    token,
+                    token: serverModule.configuredToken(),
                     protocol_version: 1,
                     role: DeviceRole.HEART,
                 },
