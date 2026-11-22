@@ -80,7 +80,7 @@ describe("brain WebSocket server", () => {
 
 	it("accepts a hello with the configured token", async () => {
 		const client = await connect();
-		const request = hello(token);
+		const request = hello(server.configuredToken());
 		client.send(encode(request));
 
 		const response = await receive(client);
@@ -106,7 +106,7 @@ describe("brain WebSocket server", () => {
 
 	it("rejects an invalid hello payload and closes the client", async () => {
 		const client = await connect();
-		client.send(encode(hello(token, { device_id: "" })));
+		client.send(encode(hello(server.configuredToken(), { device_id: "" })));
 
 		const response = await receive(client);
 		expect(response.payload).toMatchObject({
@@ -168,7 +168,7 @@ describe("brain WebSocket server", () => {
 			topic: Topics.SYS_HELLO,
 			payload: {
 				device_id: "heart-test-expired",
-				token,
+				token: server.configuredToken(),
 				protocol_version: 1,
 				role: DeviceRole.HEART,
 			},

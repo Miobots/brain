@@ -72,7 +72,7 @@ function helloEnvelope(deviceId = "heart-sim-01") {
     topic: Topics.SYS_HELLO,
     payload: {
       device_id: deviceId,
-      token: process.env.DEV_TOKEN!,
+      token: serverModule.configuredToken(),
       protocol_version: 1,
       role: "heart",
     },

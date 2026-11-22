@@ -20,6 +20,7 @@ import {
     isAuditRequestPayload,
     isPairPayload,
     newEnvelope,
+    queuesInOutbox,
     type AckPayload,
     type HelloPayload,
     type CapabilityManifestPayload,
@@ -29,6 +30,7 @@ import { config } from "./config.ts";
 import { createHeartbeat, handleAck, handleHeartBeat, sendCommand } from "./hub.ts";
 import { deviceCommands } from "./command-store.ts";
 import { resetSequence, checkSequence } from "./sequence-tracker.ts";
+import { firstDelivery } from "./receipts.ts";
 import { runAgentLoop, speakUnspokenReply } from "./agent.ts";
 import { devices, deviceRoles, deviceSeq, resolveHeartDeviceId } from "./devices.ts";
 import { deviceGenerations } from "./devices.ts";
@@ -808,6 +810,14 @@ if (hello.role === DeviceRole.GANGLION) {
             return;
         }
 
+        // The sender keeps this event until we confirm it (ENVELOPE §8). A copy we already hold
+        // came again because its receipt was lost with the link: confirm it, but act on it once.
+        const confirm = queuesInOutbox(envelope.kind, envelope.topic);
+        if (confirm && !firstDelivery(envelope.msg_id)) {
+            sendTo(deviceId, Topics.SYS_RECEIPT, { msg_ids: [envelope.msg_id] }, Kind.ACK);
+            return;
+        }
+
         if (envelope.kind === Kind.ACK) {
             handleAck(envelope, { deviceId, socket: ws });
         }
@@ -916,6 +926,8 @@ if (hello.role === DeviceRole.GANGLION) {
         if (envelope.kind === Kind.EVT && envelope.topic === Topics.NAV_RESULT) {
             handleNavigationResult(deviceId, envelope);
         }
+        // Only after it has been handled: a receipt is what lets the sender delete it.
+        if (confirm) sendTo(deviceId, Topics.SYS_RECEIPT, { msg_ids: [envelope.msg_id] }, Kind.ACK);
     });
 
     ws.on("close", () => {
