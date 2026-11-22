@@ -1,5 +1,4 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { loadState, saveState } from "./state.ts";
 import type { PushTokenPayload } from "@miobots/protocol";
 
 /**
@@ -20,25 +19,14 @@ interface StoredToken {
 
 const PUSH_TIMEOUT_MS = 5_000;
 
-// ponytail: one JSON file beside the paired laptops; moves to Postgres with them (phase 3).
-function storePath(): string {
-  return process.env.PUSH_TOKENS_FILE ?? "data/push-tokens.json";
-}
-
+// A file, or `brain_state` in Postgres when there is a database (BRAIN_DECISIONS 30).
 function load(): Record<string, StoredToken> {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(storePath(), "utf8"));
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, StoredToken>) : {};
-  } catch {
-    return {};
-  }
+  const parsed = loadState<unknown>("push_tokens");
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, StoredToken>) : {};
 }
 
 function save(tokens: Record<string, StoredToken>): void {
-  const path = storePath();
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(`${path}.tmp`, `${JSON.stringify(tokens, null, 2)}\n`, { mode: 0o600 });
-  renameSync(`${path}.tmp`, path);
+  saveState("push_tokens", tokens);
 }
 
 /** An app told us where to reach it. An empty token unregisters it. */

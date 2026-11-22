@@ -1,6 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { loadState, saveState } from "./state.ts";
 import { ProtocolDefaults, type AckPayload } from "@miobots/protocol";
 
 /**
@@ -31,25 +30,14 @@ export const MAX_WRONG_CODES = 5;
 const pending = new Map<string, Pending>();
 let wrongCodes = 0;
 
-// ponytail: one JSON file; move to Postgres when the audit log (phase 3) wires it up.
-function storePath(): string {
-  return process.env.PAIRED_GANGLIONS_FILE ?? "data/paired-ganglions.json";
-}
-
+// A file, or `brain_state` in Postgres when there is a database (BRAIN_DECISIONS 30).
 function load(): PairedGanglion[] {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(storePath(), "utf8"));
-    return Array.isArray(parsed) ? (parsed as PairedGanglion[]) : [];
-  } catch {
-    return [];
-  }
+  const parsed = loadState<unknown>("paired_ganglions");
+  return Array.isArray(parsed) ? (parsed as PairedGanglion[]) : [];
 }
 
 function save(list: PairedGanglion[]): void {
-  const path = storePath();
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(`${path}.tmp`, `${JSON.stringify(list, null, 2)}\n`, { mode: 0o600 });
-  renameSync(`${path}.tmp`, path);
+  saveState("paired_ganglions", list);
 }
 
 const sha256 = (token: string): Buffer => createHash("sha256").update(token).digest();
