@@ -10,7 +10,7 @@ import {
   type ApprovalTicket,
   type JsonObject,
 } from "@miobots/protocol";
-import { devices, deviceRoles } from "./devices.ts";
+import { approvalDesktops, devices, deviceRoles } from "./devices.ts";
 import { sendCommandHandle } from "./hub.ts";
 import type { MCPToolPermissionProvider } from "../agents/mcp-agent/tool-executor.ts";
 import { killSwitchActive, recordRefusal, recordToolCall } from "./audit.ts";
@@ -48,8 +48,11 @@ let announceLater: ((text: string) => Promise<void>) | undefined;
 const argsDigest = (args: unknown): string => createHash("sha256").update(canonicalJson(args)).digest("hex");
 const callKey = (toolName: string, args: unknown): string => `${toolName}\n${argsDigest(args)}`;
 
+/** Every connected app, plus laptops that offered a desktop approval surface. */
 function connectedApps(): string[] {
-  return [...deviceRoles].filter(([id, role]) => role === DeviceRole.SYNAPSE && devices.has(id)).map(([id]) => id);
+  return [...deviceRoles]
+    .filter(([id, role]) => devices.has(id) && (role === DeviceRole.SYNAPSE || (role === DeviceRole.GANGLION && approvalDesktops.has(id))))
+    .map(([id]) => id);
 }
 
 /** Sends `sys.approval` to every connected app; the first answer wins. */

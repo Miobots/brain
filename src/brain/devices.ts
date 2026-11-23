@@ -10,6 +10,13 @@ export const deviceRoles = new Map<string, DeviceRole>();
 export const deviceGenerations = new Map<string, number>();
 
 /**
+ * Laptops whose daemon offered a desktop approval surface (`desktop-approval` in its hello's
+ * capabilities; G2.3, BRAIN_DECISIONS 30). They are asked alongside the phone; the first answer wins.
+ */
+export const DESKTOP_APPROVAL = "desktop-approval";
+export const approvalDesktops = new Set<string>();
+
+/**
  * Resolves a connected physical robot using trusted handshake state.
  * Map insertion order is the deterministic tie-breaker when several Hearts are connected.
  */
