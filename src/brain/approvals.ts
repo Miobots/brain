@@ -10,10 +10,11 @@ import {
   type ApprovalTicket,
   type JsonObject,
 } from "@miobots/protocol";
-import { devices, deviceRoles } from "./devices.ts";
+import { approvalDesktops, devices, deviceRoles } from "./devices.ts";
 import { sendCommandHandle } from "./hub.ts";
 import type { MCPToolPermissionProvider } from "../agents/mcp-agent/tool-executor.ts";
-import { killSwitchActive, recordToolCall } from "./audit.ts";
+import { killSwitchActive, recordRefusal, recordToolCall } from "./audit.ts";
+import { loadState, saveState } from "./state.ts";
 
 /**
  * Asking a human before a laptop action runs (B5.2, B5.3, G2.3, G2.5; BRAIN_DECISIONS 27).
@@ -25,7 +26,7 @@ import { killSwitchActive, recordToolCall } from "./audit.ts";
 
 export type ApprovalOutcome =
   | { approved: true; approvedBy: string }
-  | { approved: false; reason: string; unanswered?: boolean };
+  | { approved: false; reason: string; unanswered?: boolean; by?: string };
 
 /** How long Ganglion may act on a ticket after the tap. */
 const TICKET_TTL_MS = 30_000;
@@ -47,8 +48,11 @@ let announceLater: ((text: string) => Promise<void>) | undefined;
 const argsDigest = (args: unknown): string => createHash("sha256").update(canonicalJson(args)).digest("hex");
 const callKey = (toolName: string, args: unknown): string => `${toolName}\n${argsDigest(args)}`;
 
+/** Every connected app, plus laptops that offered a desktop approval surface. */
 function connectedApps(): string[] {
-  return [...deviceRoles].filter(([id, role]) => role === DeviceRole.SYNAPSE && devices.has(id)).map(([id]) => id);
+  return [...deviceRoles]
+    .filter(([id, role]) => devices.has(id) && (role === DeviceRole.SYNAPSE || (role === DeviceRole.GANGLION && approvalDesktops.has(id))))
+    .map(([id]) => id);
 }
 
 /** Sends `sys.approval` to every connected app; the first answer wins. */
@@ -78,7 +82,7 @@ export function askApps(
           for (const other of handles) if (other !== handle) other.cancel("answered elsewhere");
           resolve(ack.accepted
             ? { approved: true, approvedBy: handle.deviceId }
-            : { approved: false, reason: ack.reason ?? "It was rejected on the phone." });
+            : { approved: false, reason: ack.reason ?? "It was rejected on the phone.", by: handle.deviceId });
         },
         () => {
           if (--silent === 0) resolve({ approved: false, unanswered: true, reason: "Nobody answered on the phone in time." });
@@ -153,18 +157,34 @@ export function createApprovalPermissionProvider(options: {
         return allow(toolName, args, ticket(approvalId, outcome.approvedBy, toolName, args));
       }
       if (outcome.unanswered) {
+        void recordRefusal("approval_unanswered", toolName, args);
         addToInbox({ approvalId, toolName, qualifiedName: tool.qualifiedName, args });
         return { allowed: false, code: "approval_required", message: `${outcome.reason} It is waiting in the app's inbox.` };
       }
       console.log(`[APPROVAL] rejected id=${approvalId} tool=${toolName}`);
+      void recordRefusal("approval_rejected", toolName, args, outcome.by);
       return { allowed: false, code: "approval_rejected", message: outcome.reason };
     },
   };
 }
 
+// The inbox survives a Brain restart: a file, or `brain_state` in Postgres (BRAIN_DECISIONS 30).
+function persistInbox(): void {
+  saveState("approval_inbox", [...inbox.values()]);
+}
+
+/** Refills the inbox from storage. Call once at start, after `initState`. */
+export function restoreInbox(): void {
+  inbox.clear();
+  const saved = loadState<InboxItem[]>("approval_inbox");
+  for (const item of Array.isArray(saved) ? saved : []) inbox.set(item.approvalId, item);
+  if (inbox.size) console.log(`[APPROVAL] ${inbox.size} waiting in the inbox from before the restart`);
+}
+
 function addToInbox(item: InboxItem): void {
   inbox.set(item.approvalId, item);
   while (inbox.size > INBOX_LIMIT) inbox.delete(inbox.keys().next().value!);
+  persistInbox();
   console.log(`[APPROVAL] unanswered, kept in inbox id=${item.approvalId} tool=${item.toolName}`);
 }
 
@@ -181,6 +201,7 @@ export function inboxSize(): number {
 export function clearInbox(): void {
   inbox.clear();
   preApproved.clear();
+  persistInbox();
 }
 
 /**
@@ -192,7 +213,12 @@ export async function deliverInbox(appId: string, ask: typeof askApps = askApps)
     const outcome = await ask(item.approvalId, item.toolName, item.args, [appId]);
     if (!outcome.approved && outcome.unanswered) continue;
     inbox.delete(item.approvalId);
-    if (!outcome.approved || !runLater) continue;
+    persistInbox();
+    if (!outcome.approved) {
+      void recordRefusal("approval_rejected", item.toolName, item.args, outcome.by);
+      continue;
+    }
+    if (!runLater) continue;
     const key = callKey(item.toolName, item.args);
     preApproved.set(key, ticket(item.approvalId, outcome.approvedBy, item.toolName, item.args));
     const result = await runLater(item.qualifiedName, item.args).catch((error: unknown) => (error instanceof Error ? error.message : String(error)));

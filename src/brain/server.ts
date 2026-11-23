@@ -32,7 +32,7 @@ import { deviceCommands } from "./command-store.ts";
 import { resetSequence, checkSequence } from "./sequence-tracker.ts";
 import { firstDelivery } from "./receipts.ts";
 import { runAgentLoop, speakUnspokenReply } from "./agent.ts";
-import { devices, deviceRoles, deviceSeq, resolveHeartDeviceId } from "./devices.ts";
+import { approvalDesktops, DESKTOP_APPROVAL, devices, deviceRoles, deviceSeq, resolveHeartDeviceId } from "./devices.ts";
 import { deviceGenerations } from "./devices.ts";
 import { mcpConnectionManager } from "../agents/mcp-agent/manager.ts";
 import type { MCPAuthenticatedPeer } from "../agents/mcp-agent/types.ts";
@@ -734,6 +734,8 @@ wss.on("connection", (ws) => {
             devices.set(deviceId, ws);
             deviceSeq.set(deviceId, outboundSeq);
             deviceRoles.set(deviceId, hello.role);
+            if (hello.role === DeviceRole.GANGLION && Array.isArray(hello.capabilities) && hello.capabilities.includes(DESKTOP_APPROVAL)) approvalDesktops.add(deviceId);
+            else approvalDesktops.delete(deviceId);
             deviceGenerations.set(deviceId, generation);
             if (!deviceCommands.has(deviceId)) {
                 deviceCommands.set(deviceId, new Map());
@@ -941,6 +943,7 @@ if (hello.role === DeviceRole.GANGLION) {
                 devices.delete(deviceId);
                 deviceSeq.delete(deviceId);
                 deviceRoles.delete(deviceId);
+                approvalDesktops.delete(deviceId);
                 deviceGenerations.delete(deviceId);
                 void mcpConnectionManager.detach({ deviceId, socket: ws, generation });
                 if (wasLaptop) relayDevicesToApps();

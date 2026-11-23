@@ -78,9 +78,15 @@ function fromRow(row: Row): AuditEntry {
   };
 }
 
-export function postgresAuditStore(connectionString: string): AuditStore & { ready: Promise<void> } {
+/** One small pool for the whole Brain: the audit log and `brain_state` share it. */
+export function createPool(connectionString: string): pg.Pool {
   const pool = new pg.Pool({ connectionString, max: 3 });
-  pool.on("error", (error) => console.warn(`[AUDIT] database connection error: ${error.message}`));
+  pool.on("error", (error) => console.warn(`[DB] connection error: ${error.message}`));
+  return pool;
+}
+
+export function postgresAuditStore(target: string | pg.Pool): AuditStore & { ready: Promise<void> } {
+  const pool = typeof target === "string" ? createPool(target) : target;
   const ready = pool.query(SCHEMA).then(() => undefined);
   return {
     ready,
@@ -145,7 +151,7 @@ export async function initAudit(next: AuditStore | undefined): Promise<void> {
     return;
   }
   try {
-    const last = (await store.all()).filter((row) => row.event !== "tool_call").at(-1);
+    const last = (await store.all()).filter((row) => row.event === "killswitch_on" || row.event === "killswitch_off").at(-1);
     killSwitch = last?.event === "killswitch_on";
     console.log(`[AUDIT] ready; kill switch ${killSwitch ? "ON" : "off"}`);
   } catch (error) {
@@ -153,11 +159,23 @@ export async function initAudit(next: AuditStore | undefined): Promise<void> {
   }
 }
 
-/** Records one laptop tool call. Throws when it can't, and the caller must then refuse the call. */
-export async function recordToolCall(tool: string, args: Record<string, unknown>, approvedBy?: string): Promise<void> {
+async function record(event: AuditEvent, tool: string, args: Record<string, unknown>, by?: string): Promise<void> {
   if (!store) throw new Error("The audit log is not set up (no DATABASE_URL).");
-  const row = await store.append({ event: "tool_call", tool, args: JSON.parse(JSON.stringify(args)) as JsonObject, ...(approvedBy ? { approved_by: approvedBy } : {}) });
-  console.log(`[AUDIT] row ${row.id} tool=${tool}${approvedBy ? ` approved_by=${approvedBy}` : ""}`);
+  const row = await store.append({ event, tool, args: JSON.parse(JSON.stringify(args)) as JsonObject, ...(by ? { approved_by: by } : {}) });
+  console.log(`[AUDIT] row ${row.id} ${event} tool=${tool}${by ? ` by=${by}` : ""}`);
+}
+
+/** Records one laptop tool call. Throws when it can't, and the caller must then refuse the call. */
+export function recordToolCall(tool: string, args: Record<string, unknown>, approvedBy?: string): Promise<void> {
+  return record("tool_call", tool, args, approvedBy);
+}
+
+/**
+ * Records an action nobody allowed: rejected (`by` is who said no) or unanswered. Nothing ran, so a
+ * failed write is only logged, never a reason to change the outcome.
+ */
+export async function recordRefusal(event: "approval_rejected" | "approval_unanswered", tool: string, args: Record<string, unknown>, by?: string): Promise<void> {
+  await record(event, tool, args, by).catch((error: Error) => console.warn(`[AUDIT] ${event} not recorded: ${error.message}`));
 }
 
 export function killSwitchActive(): boolean {

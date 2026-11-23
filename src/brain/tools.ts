@@ -13,6 +13,7 @@ import { MCPAgentRunner } from "../agents/mcp-agent/agent.ts";
 import { mcpConnectionManager } from "../agents/mcp-agent/manager.ts";
 import { MCPToolRegistry } from "../agents/mcp-agent/tool-registry.ts";
 import { MCPToolExecutor } from "../agents/mcp-agent/tool-executor.ts";
+import { discoverMCPTools } from "../agents/mcp-agent/tools.ts";
 import { createApprovalPermissionProvider, setInboxRunner } from "./approvals.ts";
 import { killSwitchActive } from "./audit.ts";
 import { notifyApprovalWaiting } from "./push.ts";
@@ -219,6 +220,8 @@ const laptopExecutor = new MCPToolExecutor(laptopRegistry, mcpConnectionManager,
 });
 const laptopAgent = new MCPAgentRunner({ registry: laptopRegistry, manager: mcpConnectionManager, executor: laptopExecutor });
 setInboxRunner(async (qualifiedName, args) => {
+  // The registry fills when the laptop agent runs; after a Brain restart an inbox re-run comes first.
+  discoverMCPTools(laptopRegistry, mcpConnectionManager);
   const result = await laptopExecutor.execute(qualifiedName, args);
   return result.ok ? "Done, that laptop request you approved has run." : `That laptop request failed: ${result.error?.message ?? "unknown error"}`;
 });
