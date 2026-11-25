@@ -17,6 +17,7 @@ import { createApprovalPermissionProvider, setInboxRunner } from "./approvals.ts
 import { killSwitchActive } from "./audit.ts";
 import { notifyApprovalWaiting } from "./push.ts";
 import type { MCPAgentResult } from "../agents/mcp-agent/types.ts";
+import { cancelReminderTool, listRemindersTool, setReminderTool } from "./reminders.ts";
 
 /**
  * Returns the deterministic authenticated Heart target for hardware tool commands.
@@ -234,6 +235,9 @@ export const toolRegistry: Record<string, ToolDefinition> = {
   navigate_to: navigateToTool,
   cancel_navigation: cancelNavigationTool,
   ask_laptop: askLaptopTool,
+  set_reminder: setReminderTool,
+  list_reminders: listRemindersTool,
+  cancel_reminder: cancelReminderTool,
 };
 
 function getTargetDeviceId(value: unknown): string {
