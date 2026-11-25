@@ -100,6 +100,11 @@ describe("brain hub device registration", () => {
     expect(welcome.payload).toMatchObject({ accepted: true });
     expect(serverModule.devices.has("heart-sim-01")).toBe(true);
 
+    // A Heart is sent its reminder window as soon as it is in (B4.2).
+    const window = await receiveEnvelope(client);
+    expect(window.topic).toBe(Topics.SCHED_WINDOW);
+    expect(window.payload).toMatchObject({ occurrences: [] });
+
     const commandPromise = hubModule.sendCommand("heart-sim-01", Topics.VOICE_SPEAK, {
       text: "Assalam o alaikum",
       lang: Language.UR,

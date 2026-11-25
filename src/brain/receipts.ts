@@ -18,3 +18,8 @@ export function firstDelivery(msgId: string): boolean {
     if (seen.size > SEEN_LIMIT) seen.delete(seen.values().next().value!);
     return true;
 }
+
+/** An event whose handling failed: the next copy the robot sends must be acted on, not skipped. */
+export function forgetDelivery(msgId: string): void {
+    seen.delete(msgId);
+}

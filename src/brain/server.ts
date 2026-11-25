@@ -30,7 +30,8 @@ import { config } from "./config.ts";
 import { createHeartbeat, handleAck, handleHeartBeat, sendCommand } from "./hub.ts";
 import { deviceCommands } from "./command-store.ts";
 import { resetSequence, checkSequence } from "./sequence-tracker.ts";
-import { firstDelivery } from "./receipts.ts";
+import { firstDelivery, forgetDelivery } from "./receipts.ts";
+import { localTimeLine, pushWindow, recordFired } from "./reminders.ts";
 import { runAgentLoop, speakUnspokenReply } from "./agent.ts";
 import { devices, deviceRoles, deviceSeq, resolveHeartDeviceId } from "./devices.ts";
 import { deviceGenerations } from "./devices.ts";
@@ -362,7 +363,7 @@ export const httpServer = http.createServer((req, res) => {
                         // A manifest kept from a robot that has since gone would claim it can still drive.
                         robot: devices.has(targetDeviceId) ? latestManifests.get(targetDeviceId) : undefined,
                         brain: brainManifest(deviceRoles.values()),
-                    }),
+                    }) + "\n" + localTimeLine(),
                     sessionId,
                     userId,
                 });
@@ -780,6 +781,10 @@ if (hello.role === DeviceRole.GANGLION) {
             // publish tick, so replay what we already know.
             // Only devices still connected: replaying a robot that has since gone would stamp it
             // fresh on the app, and the app would show it as available for three ticks.
+            // A robot that has just connected gets the next 72 h of reminders (B4.2): the whole
+            // window, which replaces whatever it held.
+            if (hello.role === DeviceRole.HEART) void pushWindow(deviceId);
+
             if (hello.role === DeviceRole.SYNAPSE) {
                 for (const [sourceId, cached] of latestManifests) {
                     if (devices.has(sourceId)) sendTo(deviceId, Topics.CAP_MANIFEST, cached);
@@ -925,6 +930,17 @@ if (hello.role === DeviceRole.GANGLION) {
         }
         if (envelope.kind === Kind.EVT && envelope.topic === Topics.NAV_RESULT) {
             handleNavigationResult(deviceId, envelope);
+        }
+        // A reminder the robot announced (B4.3). Stored before it is confirmed, because the receipt
+        // lets the robot delete its only copy; if storing fails, the next copy is acted on.
+        if (envelope.kind === Kind.EVT && envelope.topic === Topics.SCHED_FIRED) {
+            const msgId = envelope.msg_id;
+            const from = deviceId;
+            void recordFired(from, envelope.payload, envelope.t_wall_ms).then((stored) => {
+                if (stored) sendTo(from, Topics.SYS_RECEIPT, { msg_ids: [msgId] }, Kind.ACK);
+                else forgetDelivery(msgId);
+            });
+            return;
         }
         // Only after it has been handled: a receipt is what lets the sender delete it.
         if (confirm) sendTo(deviceId, Topics.SYS_RECEIPT, { msg_ids: [envelope.msg_id] }, Kind.ACK);
